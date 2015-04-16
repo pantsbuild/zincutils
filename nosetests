@@ -1,0 +1,5 @@
+NOSETESTS=./venv/bin/nosetests
+if [ ! -f "${NOSETESTS}" ]; then
+  ./make_venv.sh
+fi
+${NOSETESTS} "$@"

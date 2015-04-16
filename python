@@ -1,0 +1,5 @@
+PYTHON=./venv/bin/python
+if [ ! -f "${PYTHON}" ]; then
+  ./make_venv.sh
+fi
+${PYTHON} "$@"

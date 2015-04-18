@@ -13,8 +13,7 @@ from six.moves import range
 
 from zincutils.analysis_parser import (AnalysisParser, ParseError, raise_on_eof)
 from zincutils.zinc_analysis import (APIs, Compilations, CompileSetup, Relations,
-                                SourceInfos, Stamps, ZincAnalysis)
-
+    SourceInfos, Stamps, ZincAnalysis)
 
 class ZincAnalysisParser(AnalysisParser):
   """Parses a zinc analysis file."""
@@ -85,11 +84,11 @@ class ZincAnalysisParser(AnalysisParser):
     if expected_header:
       line = lines_iter.next()
       if expected_header + ':\n' != line:
-        raise ParseError('Expected: "%s:". Found: "%s"' % (expected_header, line))
+        raise ParseError('Expected: "{}:". Found: "{}"'.format(expected_header, line))
     n = self.parse_num_items(lines_iter.next())
     relation = defaultdict(list)  # Values are lists, to accommodate relations.
     for i in range(n):
-      k, _, v = lines_iter.next().partition(' -> ')
+      k, _, v = lines_iter.next().decode('utf-8').partition(u' -> ')
       if len(v) == 1:  # Value on its own line.
         v = lines_iter.next()
       relation[k].append(v[:-1])

@@ -9,7 +9,6 @@ import itertools
 import os
 from collections import defaultdict
 
-from zincutils.analysis import Analysis
 from zincutils.zinc_analysis_diff import ZincAnalysisElementDiff
 
 
@@ -118,7 +117,7 @@ class ZincAnalysisElement(object):
       arg[k] = [token_translator.convert_base64_string(v) for v in vals]
 
 
-class ZincAnalysis(Analysis):
+class ZincAnalysis(object):
   """Parsed representation of a zinc analysis.
 
   Note also that all files in keys/values are full-path, just as they appear in the analysis file.
@@ -388,6 +387,10 @@ class ZincAnalysis(Analysis):
       analyses.append(ZincAnalysis(self.compile_setup, relations, stamps, apis, source_infos, self.compilations))
 
     return analyses
+
+  def write_to_path(self, outfile_path, rebasings=None):
+    with open(outfile_path, 'w') as outfile:
+      self.write(outfile, rebasings)
 
   def write(self, outfile, rebasings=None):
     outfile.write(ZincAnalysis.FORMAT_VERSION_LINE)

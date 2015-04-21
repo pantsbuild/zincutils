@@ -10,7 +10,6 @@ import shutil
 import StringIO
 import unittest
 
-from zincutils.analysis_parser import ParseError
 from zincutils.zinc_analysis import ZincAnalysis
 from zincutils.zinc_analysis_parser import ZincAnalysisParser
 from zincutils.contextutil import Timer, temporary_dir
@@ -108,17 +107,6 @@ class ZincAnalysisTest(unittest.TestCase):
 
       analyses = self._time(lambda: [parse(f) for f in analysis_files],
                             'Parsed %d files' % num_analyses)
-
-      # Get the right exception on a busted file.
-      truncated_dir = os.path.join(tmpdir, 'truncated')
-      os.mkdir(truncated_dir)
-      f = os.path.join(truncated_dir, os.path.basename(analysis_files[0]))
-      shutil.copy(analysis_files[0], f)
-      with open(f, 'r+b') as truncated:
-        truncated.seek(-150, os.SEEK_END)
-        truncated.truncate()
-      with self.assertRaises(ParseError):
-        parse(f)
 
       # Write them back out individually.
       writeout_dir = os.path.join(tmpdir, 'write')

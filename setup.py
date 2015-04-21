@@ -11,7 +11,7 @@ config = {
     'url': 'https://pypi.python.org/pypi/zincutils',
     'author_email': 'pants-devel@groups.google.com',
     'version': '0.1',
-    'install_requires': ['nose'],
+    'install_requires': ['six'],
     'packages': ['zincutils'],
     'scripts': [],
 }

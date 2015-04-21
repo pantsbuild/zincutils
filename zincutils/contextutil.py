@@ -5,16 +5,10 @@
 from __future__ import (absolute_import, division, generators, nested_scopes, print_function,
                         unicode_literals, with_statement)
 
-import os
 import shutil
-import tarfile
 import tempfile
 import time
-import uuid
-import zipfile
-from contextlib import closing, contextmanager
-
-from six import string_types
+from contextlib import contextmanager
 
 
 @contextmanager
@@ -38,11 +32,11 @@ class Timer(object):
   """Very basic with-context to time operations
 
   Example usage:
-    >>> from pants.util.contextutil import Timer
-    >>> with Timer() as timer:
-    ...   time.sleep(2)
-    ...
-    >>> timer.elapsed
+    from pants.util.contextutil import Timer
+    with Timer() as timer:
+      time.sleep(2)
+      ...
+    timer.elapsed
     2.0020849704742432
 
   """

@@ -267,6 +267,9 @@ class ZincAnalysis(object):
         element_diffs.append(element_diff)
     return element_diffs
 
+  def sources(self):
+    return self.stamps.sources.keys()
+
   def __eq__(self, other):
     return ((self.compile_setup, self.relations, self.stamps, self.apis,
              self.source_infos, self.compilations) ==
@@ -287,7 +290,7 @@ class ZincAnalysis(object):
     splits = [set([s if os.path.isabs(s) else os.path.join(buildroot, s) for s in x]) for x in splits]
     if catchall:
       # Even empty sources with no products have stamps.
-      remainder_sources = set(self.stamps.sources.keys()).difference(*splits)
+      remainder_sources = set(self.sources()).difference(*splits)
       splits.append(remainder_sources)  # The catch-all
 
     # Split relations.

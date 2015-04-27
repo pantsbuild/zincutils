@@ -44,14 +44,14 @@ class ZincAnalysisParser(object):
   def parse_products(self, infile):
     """An efficient parser of just the products section."""
     self._verify_version(infile)
-    return self._find_repeated_at_header(infile, 'products')
+    return self._find_repeated_at_header(infile, b'products')
 
   def parse_deps(self, infile, classes_dir):
     self._verify_version(infile)
     # Note: relies on the fact that these headers appear in this order in the file.
-    bin_deps = self._find_repeated_at_header(infile, 'binary dependencies')
-    src_deps = self._find_repeated_at_header(infile, 'direct source dependencies')
-    ext_deps = self._find_repeated_at_header(infile, 'direct external dependencies')
+    bin_deps = self._find_repeated_at_header(infile, b'binary dependencies')
+    src_deps = self._find_repeated_at_header(infile, b'direct source dependencies')
+    ext_deps = self._find_repeated_at_header(infile, b'direct external dependencies')
 
     # TODO(benjy): Temporary hack until we inject a dep on the scala runtime jar.
     scalalib_re = re.compile(r'scala-library-\d+\.\d+\.\d+\.jar$')
@@ -61,7 +61,7 @@ class ZincAnalysisParser(object):
 
     transformed_ext_deps = {}
     def fqcn_to_path(fqcn):
-      return os.path.join(classes_dir, fqcn.replace('.', os.sep) + '.class')
+      return os.path.join(classes_dir, fqcn.replace(b'.', os.sep) + b'.class')
     for src, fqcns in ext_deps.items():
       transformed_ext_deps[src] = [fqcn_to_path(fqcn) for fqcn in fqcns]
 
@@ -71,7 +71,7 @@ class ZincAnalysisParser(object):
     return ret
 
   def _find_repeated_at_header(self, lines_iter, header):
-    header_line = header + ':\n'
+    header_line = header + b':\n'
     while lines_iter.next() != header_line:
       pass
     return self._parse_section(lines_iter, expected_header=None)
@@ -85,12 +85,12 @@ class ZincAnalysisParser(object):
     """Parse a single section."""
     if expected_header:
       line = lines_iter.next()
-      if expected_header + ':\n' != line:
+      if expected_header + b':\n' != line:
         raise self.ParseError('Expected: "{}:". Found: "{}"'.format(expected_header, line))
     n = self._parse_num_items(lines_iter.next())
     relation = defaultdict(list)  # Values are lists, to accommodate relations.
     for i in range(n):
-      k, _, v = lines_iter.next().decode('utf-8').partition(' -> ')
+      k, _, v = lines_iter.next().partition(b' -> ')
       if len(v) == 1:  # Value on its own line.
         v = lines_iter.next()
       relation[k].append(v[:-1])

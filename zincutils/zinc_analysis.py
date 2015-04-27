@@ -42,14 +42,16 @@ class ZincAnalysisElement(object):
     # 'org/pantsbuild/Foo.scala': ['org/pantsbuild/Foo.class', 'org/pantsbuild/Foo$.class']
     #
     # Subclasses can alias the elements of self.args in their own __init__, for convenience.
-    self.args = []
-    # Sort the values for each key. This consistency makes it easier to test and to
-    # debug live problems in the wild.
-    for arg in args:
-      sorted_arg = defaultdict(list)
-      for k, vs in arg.items():
-        sorted_arg[k] = sorted(vs)
-      self.args.append(sorted_arg)
+
+    if os.environ.get('ZINCUTILS_SORTED_ANALYSIS'):
+      self.args = []
+      for arg in args:
+        sorted_arg = defaultdict(list)
+        for k, vs in arg.items():
+          sorted_arg[k] = sorted(vs)
+        self.args.append(sorted_arg)
+    else:
+      self.args = args
 
   def diff(self, other):
     return ZincAnalysisElementDiff(self, other)
@@ -75,31 +77,56 @@ class ZincAnalysisElement(object):
   def _write_section(self, outfile, header, rep, inline_vals=True, rebasings=None):
     """Write a single section.
 
-    Items are sorted, for ease of testing. TODO: Reconsider this if it hurts performance.
+    Items are sorted, for ease of testing, only if ZINCUTILS_SORTED_ANALYSIS is set in
+    the environment, and is not falsy. The sort is too costly to have in production use.
     """
-    def rebase(txt):
+    def rebase(bytes):
       for rebase_from, rebase_to in rebasings:
         if rebase_to is None:
-          if rebase_from in txt:
+          if rebase_from in bytes:
             return None
         else:
-          txt = txt.replace(rebase_from, rebase_to)
-      return txt
+          bytes = bytes.replace(rebase_from, rebase_to)
+      return bytes
 
     rebasings = rebasings or []
-    items = []
-    for k, vals in rep.items():
-      for v in vals:
-        item = rebase('{} -> {}{}'.format(k, '' if inline_vals else '\n', v))
-        if item:
-          items.append(item)
+    num_items = 0
+    for vals in rep.values():
+      num_items += len(vals)
 
-    items.sort()
-    outfile.write(header + ':\n')
-    outfile.write('{} items\n'.format(len(items)))
-    for item in items:
-      outfile.write(item.encode('utf-8'))
-      outfile.write('\n')
+    outfile.write(header + b':\n')
+    outfile.write(b'{} items\n'.format(num_items))
+
+    # Writing in large chunks is significantly faster than encoding and writing line-by-line.
+    fragments = []
+    def do_write():
+      buf = rebase(b''.join(fragments))
+      outfile.write(buf)
+      del fragments[:]
+
+    if os.environ.get('ZINCUTILS_SORTED_ANALYSIS'):
+      # Write everything in a single chunk, so we can sort.
+      for k, vals in rep.items():
+        for v in vals:
+          item = b'{} -> {}{}\n'.format(k, b'' if inline_vals else b'\n', v)
+          fragments.append(item)
+      fragments.sort()
+      do_write()
+    else:
+      # It's not strictly necessary to chunk on item boundaries, but it's nicer.
+      chunk_size = 40000 if inline_vals else 50000
+      for k, vals in rep.items():
+        for v in vals:
+          fragments.append(k)
+          fragments.append(b' -> ')
+          if not inline_vals:
+            fragments.append(b'\n')
+          fragments.append(v)
+          fragments.append(b'\n')
+        if len(fragments) >= chunk_size:
+          do_write()
+      if fragments:
+        do_write()
 
   def translate_keys(self, token_translator, arg):
     old_keys = list(arg.keys())
@@ -127,7 +154,7 @@ class ZincAnalysis(object):
 
   # Implementation of class method required by Analysis.
 
-  FORMAT_VERSION_LINE = 'format version: 5\n'
+  FORMAT_VERSION_LINE = b'format version: 5\n'
 
   @staticmethod
   def merge_disjoint_dicts(dicts):
@@ -245,7 +272,7 @@ class ZincAnalysis(object):
     compilation_vals = sorted(set([x[0] for a in analyses for x in a.compilations.compilations.itervalues()]))
     compilations_dict = defaultdict(list)
     for i, v in enumerate(compilation_vals):
-      compilations_dict['{:03}'.format(int(i))] = [v]
+      compilations_dict[b'{:03}'.format(int(i))] = [v]
     compilations = Compilations((compilations_dict, ))
 
     return ZincAnalysis(compile_setup, relations, stamps, apis, source_infos, compilations)
@@ -285,109 +312,137 @@ class ZincAnalysis(object):
 
   # Implementation of methods required by Analysis.
 
-  def split(self, splits, buildroot, catchall=False):
+  def split(self, splits, catchall=False):
     # Note: correctly handles "externalizing" internal deps that must be external post-split.
-    splits = [set([s if os.path.isabs(s) else os.path.join(buildroot, s) for s in x]) for x in splits]
     if catchall:
       # Even empty sources with no products have stamps.
       remainder_sources = set(self.sources()).difference(*splits)
       splits.append(remainder_sources)  # The catch-all
 
+    # The inner functions are primarily for ease of performance profiling.
+
+    # For historical reasons, external deps are specified as src->class while internal deps are
+    # specified as src->src.  So when splitting we need to pick a representative.  We must pick
+    # consistently, so we take the first class name in alphanumeric order.
+    def make_representatives():
+      representatives = dict((k, min(vs)) for k, vs in self.relations.classes.items())
+      return representatives
+    representatives = make_representatives()
+
+    # Split the source, binary and classes keys in our relations structs.
+    # Subsequent operations need this data.
+    def split_relation_keys():
+      src_prod_splits = self._split_dict(self.relations.src_prod, splits)
+      binary_dep_splits = self._split_dict(self.relations.binary_dep, splits)
+      classes_splits = self._split_dict(self.relations.classes, splits)
+      return src_prod_splits, binary_dep_splits, classes_splits
+    src_prod_splits, binary_dep_splits, classes_splits = split_relation_keys()
+
     # Split relations.
-    src_prod_splits = self._split_dict(self.relations.src_prod, splits)
-    binary_dep_splits = self._split_dict(self.relations.binary_dep, splits)
-    classes_splits = self._split_dict(self.relations.classes, splits)
+    def split_relations():
+      # Split a single pair of (internal, external) dependencies.
+      def _split_dependencies(all_internal, all_external):
+        internals = []
+        externals = []
 
-    representatives = dict((k, self.representative(k, vs)) for k, vs in self.relations.classes.items())
+        naive_internals = self._split_dict(all_internal, splits)
+        naive_externals = self._split_dict(all_external, splits)
 
-    def split_dependencies(all_internal, all_external):
-      internals = []
-      externals = []
+        for naive_internal, naive_external, split in zip(naive_internals, naive_externals, splits):
+          internal = defaultdict(list)
+          external = defaultdict(list)
 
-      naive_internals = self._split_dict(all_internal, splits)
-      naive_externals = self._split_dict(all_external, splits)
+          # Note that we take care not to create empty values in external.
+          for k, vs in naive_external.items():
+            if vs:
+              external[k].extend(vs)  # Ensure a new list.
 
-      for naive_internal, naive_external, split in zip(naive_internals, naive_externals, splits):
-        internal = defaultdict(list)
-        external = defaultdict(list)
+          for k, vs in naive_internal.items():
+            for v in vs:
+              if v in split:
+                internal[k].append(v)  # Remains internal.
+              else:
+                external[k].append(representatives[v])  # Externalized.
+          internals.append(internal)
+          externals.append(external)
+        return internals, externals
 
-        # Note that we take care not to create empty values in external.
-        for k, vs in naive_external.items():
-          if vs:
-            external[k].extend(vs)  # Ensure a new list.
+      internal_splits, external_splits = \
+        _split_dependencies(self.relations.internal_src_dep, self.relations.external_dep)
+      internal_pi_splits, external_pi_splits = \
+        _split_dependencies(self.relations.internal_src_dep_pi, self.relations.external_dep_pi)
 
-        for k, vs in naive_internal.items():
-          for v in vs:
-            if v in split:
-              internal[k].append(v)  # Remains internal.
-            else:
-              external[k].append(representatives[v])  # Externalized.
-        internals.append(internal)
-        externals.append(external)
-      return internals, externals
+      member_ref_internal_splits, member_ref_external_splits = \
+        _split_dependencies(self.relations.member_ref_internal_dep, self.relations.member_ref_external_dep)
+      inheritance_internal_splits, inheritance_external_splits = \
+        _split_dependencies(self.relations.inheritance_internal_dep, self.relations.inheritance_external_dep)
+      used_splits = self._split_dict(self.relations.used, splits)
 
-    internal_splits, external_splits = \
-      split_dependencies(self.relations.internal_src_dep, self.relations.external_dep)
-    internal_pi_splits, external_pi_splits = \
-      split_dependencies(self.relations.internal_src_dep_pi, self.relations.external_dep_pi)
-
-    member_ref_internal_splits, member_ref_external_splits = \
-      split_dependencies(self.relations.member_ref_internal_dep, self.relations.member_ref_external_dep)
-    inheritance_internal_splits, inheritance_external_splits = \
-      split_dependencies(self.relations.inheritance_internal_dep, self.relations.inheritance_external_dep)
-    used_splits = self._split_dict(self.relations.used, splits)
-
-    relations_splits = []
-    for args in zip(src_prod_splits, binary_dep_splits,
-                    internal_splits, external_splits,
-                    internal_pi_splits, external_pi_splits,
-                    member_ref_internal_splits, member_ref_external_splits,
-                    inheritance_internal_splits, inheritance_external_splits,
-                    classes_splits, used_splits):
-      relations_splits.append(Relations(args))
+      relations_splits = []
+      for args in zip(src_prod_splits, binary_dep_splits,
+                      internal_splits, external_splits,
+                      internal_pi_splits, external_pi_splits,
+                      member_ref_internal_splits, member_ref_external_splits,
+                      inheritance_internal_splits, inheritance_external_splits,
+                      classes_splits, used_splits):
+        relations_splits.append(Relations(args))
+      return relations_splits
+    relations_splits = split_relations()
 
     # Split stamps.
-    stamps_splits = []
-    for src_prod, binary_dep, split in zip(src_prod_splits, binary_dep_splits, splits):
-      products_set = set(itertools.chain(*src_prod.values()))
-      binaries_set = set(itertools.chain(*binary_dep.values()))
-      products = dict((k, v) for k, v in self.stamps.products.items() if k in products_set)
-      sources = dict((k, v) for k, v in self.stamps.sources.items() if k in split)
-      binaries = dict((k, v) for k, v in self.stamps.binaries.items() if k in binaries_set)
-      classnames = dict((k, v) for k, v in self.stamps.classnames.items() if k in binaries_set)
-      stamps_splits.append(Stamps((products, sources, binaries, classnames)))
+    def split_stamps():
+      stamps_splits = []
+      sources_splits = self._split_dict(self.stamps.sources, splits)
+      for src_prod, binary_dep, sources in zip(src_prod_splits, binary_dep_splits, sources_splits):
+        products_set = set(itertools.chain(*src_prod.values()))
+        binaries_set = set(itertools.chain(*binary_dep.values()))
+        products, _ = self._restrict_dicts(products_set, self.stamps.products)
+        binaries, classnames = self._restrict_dicts(binaries_set, self.stamps.binaries,
+                                                    self.stamps.classnames)
+        stamps_splits.append(Stamps((products, sources, binaries, classnames)))
+      return stamps_splits
+    stamps_splits = split_stamps()
 
     # Split apis.
+    def split_apis():
+      # Externalized deps must copy the target's formerly internal API.
+      representative_to_internal_api = {}
+      for src, rep in representatives.items():
+        representative_to_internal_api[rep] = self.apis.internal.get(src)
 
-    # Externalized deps must copy the target's formerly internal API.
-    representative_to_internal_api = {}
-    for src, rep in representatives.items():
-      representative_to_internal_api[rep] = self.apis.internal.get(src)
+      internal_api_splits = self._split_dict(self.apis.internal, splits)
 
-    internal_api_splits = self._split_dict(self.apis.internal, splits)
+      external_api_splits = []
+      for rel in relations_splits:
+        external_api = {}
+        for vs in rel.external_dep.values():
+          for v in vs:
+            if v in representative_to_internal_api:  # This is an externalized dep.
+              external_api[v] = representative_to_internal_api[v]
+            else: # This is a dep that was already external.
+              external_api[v] = self.apis.external[v]
+        external_api_splits.append(external_api)
 
-    external_api_splits = []
-    for external in external_splits:
-      external_api = {}
-      for vs in external.values():
-        for v in vs:
-          if v in representative_to_internal_api:  # This is an externalized dep.
-            external_api[v] = representative_to_internal_api[v]
-          else: # This is a dep that was already external.
-            external_api[v] = self.apis.external[v]
-      external_api_splits.append(external_api)
-
-    apis_splits = []
-    for args in zip(internal_api_splits, external_api_splits):
-      apis_splits.append(APIs(args))
+      apis_splits = []
+      for args in zip(internal_api_splits, external_api_splits):
+        apis_splits.append(APIs(args))
+      return apis_splits
+    apis_splits = split_apis()
 
     # Split source infos.
-    source_info_splits = \
-      [SourceInfos((x, )) for x in self._split_dict(self.source_infos.source_infos, splits)]
+    def split_source_infos():
+      source_info_splits = \
+        [SourceInfos((x, )) for x in self._split_dict(self.source_infos.source_infos, splits)]
+      return source_info_splits
+    source_info_splits = split_source_infos()
 
-    analyses = []
-    for relations, stamps, apis, source_infos in zip(relations_splits, stamps_splits, apis_splits, source_info_splits):
-      analyses.append(ZincAnalysis(self.compile_setup, relations, stamps, apis, source_infos, self.compilations))
+    # Create the final ZincAnalysis instances from all these split pieces.
+    def create_analyses():
+      analyses = []
+      for relations, stamps, apis, source_infos in zip(relations_splits, stamps_splits, apis_splits, source_info_splits):
+        analyses.append(ZincAnalysis(self.compile_setup, relations, stamps, apis, source_infos, self.compilations))
+      return analyses
+    analyses = create_analyses()
 
     return analyses
 
@@ -430,20 +485,24 @@ class ZincAnalysis(object):
       ret.append(dict_split)
     return ret
 
-  def representative(self, src, classes):
-    """Pick a representative class for each src.
+  def _restrict_dicts(self, keys, dict1, dict2=None):
+    """Returns a subdict of each input dict with its keys restricted to the given set.
 
-    For historical reasons, external deps are specified as src->class while internal deps are
-    specified as src->src.  So when splitting we need to pick a representative.  We must pick
-    consistently.
+    Assumes that iterating over keys is much faster than iterating over the dicts. So use this
+    when keys is small compared to the total number of items in the dicts.
+
+    Note: the interface is a bit odd, and would be more general if we allowed an arbitrary
+    number of dicts. However in practice we only need this for 1 or 2 dicts, and this code
+    runs faster than if we had to iterate over a list of dicts in an inner loop.
     """
-    primary_class_name = os.path.splitext(os.path.basename(src))[0]
-    for fqcn in classes:
-      if fqcn.rsplit('.', 1)[-1] == primary_class_name:
-        # For ease of debugging, pick the class with the same name as the source file, if it exists.
-        return fqcn
-    # Pick the class that sorts lowest in dictionary order.
-    return min(classes)
+    ret1 = {}
+    ret2 = None if dict2 is None else {}
+    for k in keys:
+      if k in dict1:
+        ret1[k] = dict1[k]
+      if dict2 is not None and k in dict2:
+        ret2[k] = dict2[k]
+    return ret1, ret2
 
 
 class CompileSetup(ZincAnalysisElement):
@@ -460,19 +519,19 @@ class CompileSetup(ZincAnalysisElement):
     for k, vs in list(self.compile_options.items()):  # Make a copy, so we can del as we go.
       # Remove mentions of custom plugins.
       for v in vs:
-        if v.startswith('-Xplugin') or v.startswith('-P'):
+        if v.startswith(b'-Xplugin') or v.startswith(b'-P'):
           del self.compile_options[k]
 
 
 class Relations(ZincAnalysisElement):
-  headers = ('products', 'binary dependencies',
+  headers = (b'products', b'binary dependencies',
              # TODO: The following 4 headers will go away after SBT completes the
              # transition to the new headers (the 4 after that).
-             'direct source dependencies', 'direct external dependencies',
-             'public inherited source dependencies', 'public inherited external dependencies',
-             'member reference internal dependencies', 'member reference external dependencies',
-             'inheritance internal dependencies', 'inheritance external dependencies',
-             'class names', 'used names')
+             b'direct source dependencies', b'direct external dependencies',
+             b'public inherited source dependencies', b'public inherited external dependencies',
+             b'member reference internal dependencies', b'member reference external dependencies',
+             b'inheritance internal dependencies', b'inheritance external dependencies',
+             b'class names', b'used names')
 
   def __init__(self, args):
     super(Relations, self).__init__(args)
@@ -490,7 +549,7 @@ class Relations(ZincAnalysisElement):
 
 
 class Stamps(ZincAnalysisElement):
-  headers = ('product stamps', 'source stamps', 'binary stamps', 'class names')
+  headers = (b'product stamps', b'source stamps', b'binary stamps', b'class names')
 
   def __init__(self, args):
     super(Stamps, self).__init__(args)
@@ -517,7 +576,7 @@ class Stamps(ZincAnalysisElement):
 
 
 class APIs(ZincAnalysisElement):
-  headers = ('internal apis', 'external apis')
+  headers = (b'internal apis', b'external apis')
 
   def __init__(self, args):
     super(APIs, self).__init__(args)
@@ -530,7 +589,7 @@ class APIs(ZincAnalysisElement):
 
 
 class SourceInfos(ZincAnalysisElement):
-  headers = ("source infos", )
+  headers = (b'source infos', )
 
   def __init__(self, args):
     super(SourceInfos, self).__init__(args)
@@ -543,7 +602,7 @@ class SourceInfos(ZincAnalysisElement):
 
 
 class Compilations(ZincAnalysisElement):
-  headers = ('compilations', )
+  headers = (b'compilations', )
 
   def __init__(self, args):
     super(Compilations, self).__init__(args)

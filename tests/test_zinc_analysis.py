@@ -5,20 +5,32 @@
 from __future__ import (absolute_import, division, generators, nested_scopes, print_function,
                         unicode_literals, with_statement)
 
+from contextlib import contextmanager
 import os
 import shutil
 import StringIO
 import unittest
+import zipfile
 
 from zincutils.zinc_analysis import ZincAnalysis
 from zincutils.zinc_analysis_parser import ZincAnalysisParser
-from zincutils.contextutil import Timer, temporary_dir
+from zincutils.contextutil import Timer, environment_as, temporary_dir
 
 # Setting this environment variable tells the test to generate new test data (see below).
 _TEST_DATA_SOURCE_ENV_VAR = 'ZINC_ANALYSIS_TEST_DATA_SOURCE'
 
 
-class ZincAnalysisTest(unittest.TestCase):
+@contextmanager
+def _temp_test_dir(zipfile_name):
+  """Yields a test directory containing the files in the specified zipfile."""
+  zipfile_path = os.path.join(os.path.dirname(__file__), 'testdata', zipfile_name)
+  with temporary_dir(cleanup=False) as tmpdir:
+    zf = zipfile.ZipFile(zipfile_path, 'r')
+    zf.extractall(tmpdir)
+    yield tmpdir
+
+
+class ZincAnalysisTestBase(unittest.TestCase):
   def setUp(self):
     self.maxDiff = None
     self.total_time = 0
@@ -31,159 +43,160 @@ class ZincAnalysisTest(unittest.TestCase):
     self.total_time += elapsed
     return ret
 
+class ZincAnalysisTestSimple(ZincAnalysisTestBase):
   # Test a simple example that is non-trivial, but still small enough to verify manually.
-  def test_split_merge(self):
-    def get_test_analysis_path(name):
-      return os.path.join(os.path.dirname(__file__), 'testdata', 'simple', name)
+  def test_simple(self):
+    with environment_as(ZINCUTILS_SORTED_ANALYSIS='1'):
+      def get_test_analysis_path(name):
+        return os.path.join(os.path.dirname(__file__), 'testdata', 'simple', name)
 
-    def get_analysis_text(name):
-      with open(get_test_analysis_path(name), 'r') as fp:
-        return fp.read()
+      def get_analysis_text(name):
+        with open(get_test_analysis_path(name), 'r') as fp:
+          return fp.read()
 
-    def parse_analyis(name):
-      return ZincAnalysisParser().parse_from_path(get_test_analysis_path(name))
+      def parse_analyis(name):
+        return ZincAnalysisParser().parse_from_path(get_test_analysis_path(name))
 
-    def analysis_to_string(analysis):
-      buf = StringIO.StringIO()
-      analysis.write(buf)
-      return buf.getvalue()
+      def analysis_to_string(analysis):
+        buf = StringIO.StringIO()
+        analysis.write(buf)
+        return buf.getvalue()
 
-    full_analysis = parse_analyis('simple.analysis')
+      full_analysis = parse_analyis('simple.analysis')
 
-    analysis_splits = full_analysis.split([
-      ['/src/pants/examples/src/scala/org/pantsbuild/example/hello/welcome/Welcome.scala'],
-      ['/src/pants/examples/src/scala/org/pantsbuild/example/hello/exe/Exe.scala'],
-    ], os.path.dirname(__file__))
-    self.assertEquals(len(analysis_splits), 2)
+      analysis_splits = full_analysis.split([
+        ['/src/pants/examples/src/scala/org/pantsbuild/example/hello/welcome/Welcome.scala'],
+        ['/src/pants/examples/src/scala/org/pantsbuild/example/hello/exe/Exe.scala'],
+      ])
+      self.assertEquals(len(analysis_splits), 2)
 
-    def compare_split(i):
-      expected_filename = 'simple_split{0}.analysis'.format(i)
+      def compare_split(i):
+        expected_filename = 'simple_split{0}.analysis'.format(i)
 
-      # First compare as objects.  This verifies that __eq__ works, but is weaker than the
-      # text comparison because in some cases there can be small text differences that don't
-      # affect logical equivalence.
-      expected_analyis = parse_analyis(expected_filename)
-      self.assertTrue(expected_analyis == analysis_splits[i])
+        # First compare as objects.  This verifies that __eq__ works, but is weaker than the
+        # text comparison because in some cases there can be small text differences that don't
+        # affect logical equivalence.
+        expected_analyis = parse_analyis(expected_filename)
+        self.assertTrue(expected_analyis == analysis_splits[i])
 
-      # Then compare as text.  In this simple case we expect them to be byte-for-byte equal.
-      expected = get_analysis_text(expected_filename)
-      actual = analysis_to_string(analysis_splits[i])
+        # Then compare as text.  In this simple case we expect them to be byte-for-byte equal.
+        expected = get_analysis_text(expected_filename)
+        actual = analysis_to_string(analysis_splits[i])
+        self.assertMultiLineEqual(expected, actual)
+
+      compare_split(0)
+      compare_split(1)
+
+      # Now merge and check that we get what we started with.
+      merged_analysis = ZincAnalysis.merge(analysis_splits)
+      # Check that they compare as objects.
+      self.assertTrue(full_analysis == merged_analysis)
+      # Check that they compare as text.
+      expected = get_analysis_text('simple.analysis')
+      actual = analysis_to_string(merged_analysis)
       self.assertMultiLineEqual(expected, actual)
 
-    compare_split(0)
-    compare_split(1)
 
-    # Now merge and check that we get what we started with.
-    merged_analysis = ZincAnalysis.merge(analysis_splits)
-    # Check that they compare as objects.
-    self.assertTrue(full_analysis == merged_analysis)
-    # Check that they compare as text.
-    expected = get_analysis_text('simple.analysis')
-    actual = analysis_to_string(merged_analysis)
-    self.assertMultiLineEqual(expected, actual)
+class ZincAnalysisTestComplex(ZincAnalysisTestBase):
+  # Test on complex analysis files.
+  def test_complex(self):
+    with environment_as(ZINCUTILS_SORTED_ANALYSIS='1'):
+      if os.environ.get(_TEST_DATA_SOURCE_ENV_VAR):
+        print('\n>>>>>>>>> {} set: skipping test, generating canonical test data instead.'.format(
+          _TEST_DATA_SOURCE_ENV_VAR))
+        self._generate_testworthy_splits()
+        return
 
+      parser = ZincAnalysisParser()
 
-  # Test on large-scale analysis files.
-  def test_analysis_files(self):
-    if os.environ.get(_TEST_DATA_SOURCE_ENV_VAR):
-      print('\n>>>>>>>>> {} set: skipping test, generating canonical test data instead.'.format(
-        _TEST_DATA_SOURCE_ENV_VAR))
-      self._generate_testworthy_splits()
-      return
+      with _temp_test_dir('complex.zip') as testdir:
+        # Parse analysis files.
+        analysis_files = [os.path.join(testdir, f)
+                          for f in os.listdir(testdir)
+                          if f.endswith(b'.analysis') and not f.endswith(b'.merged.analysis')]
+        num_analyses = len(analysis_files)
 
-    parser = ZincAnalysisParser()
+        def parse(f):
+          return parser.parse_from_path(f)
 
-    with temporary_dir() as tmpdir:
-      analysis_dir = os.path.join(os.path.dirname(__file__), 'testdata', 'complex')
+        analyses = self._time(lambda: [parse(f) for f in analysis_files],
+                              'Parsed %d files' % num_analyses)
 
-      # Parse analysis files.
-      analysis_files = [os.path.join(analysis_dir, f)
-                        for f in os.listdir(analysis_dir)
-                        if f.endswith('.analysis') and not f.endswith('.merged.analysis')]
-      num_analyses = len(analysis_files)
+        # Write them back out individually.
+        writeout_dir = os.path.join(testdir, b'write')
+        os.mkdir(writeout_dir)
+        def write(file_name, analysis):
+          outpath = os.path.join(writeout_dir, file_name)
+          analysis.write_to_path(outpath)
 
-      def parse(f):
-        return parser.parse_from_path(f)
+        def _write_all():
+          for analysis_file, analysis in zip(analysis_files, analyses):
+            write(os.path.basename(analysis_file), analysis)
 
-      analyses = self._time(lambda: [parse(f) for f in analysis_files],
-                            'Parsed %d files' % num_analyses)
+        self._time(_write_all, 'Wrote %d files' % num_analyses)
 
-      # Write them back out individually.
-      writeout_dir = os.path.join(tmpdir, 'write')
-      os.mkdir(writeout_dir)
-      def write(file_name, analysis):
-        outpath = os.path.join(writeout_dir, file_name)
-        analysis.write_to_path(outpath)
+        # Merge them.
+        merged_analysis = self._time(lambda: ZincAnalysis.merge(analyses),
+                                     'Merged %d files' % num_analyses)
 
-      def _write_all():
-        for analysis_file, analysis in zip(analysis_files, analyses):
-          write(os.path.basename(analysis_file), analysis)
+        # Write merged analysis to file.
+        merged_analysis_path = os.path.join(writeout_dir, b'merged.analysis')
+        self._time(lambda: merged_analysis.write_to_path(merged_analysis_path),
+                   'Wrote merged analysis to %s' % merged_analysis_path)
 
-      self._time(_write_all, 'Wrote %d files' % num_analyses)
+        # Read merged analysis from file.
+        merged_analysis2 = self._time(lambda: parser.parse_from_path(merged_analysis_path),
+                                      'Read merged analysis from %s' % merged_analysis_path)
 
-      # Merge them.
-      merged_analysis = self._time(lambda: ZincAnalysis.merge(analyses),
-                                   'Merged %d files' % num_analyses)
+        # Read the expected merged analysis from file.
+        expected_merged_analysis_path = os.path.join(testdir, b'all.merged.analysis')
+        expected_merged_analysis = self._time(
+          lambda: parser.parse_from_path(expected_merged_analysis_path),
+          'Read expected merged analysis from %s' % expected_merged_analysis_path)
 
-      # Write merged analysis to file.
-      merged_analysis_path = os.path.join(tmpdir, 'merged.analysis')
-      self._time(lambda: merged_analysis.write_to_path(merged_analysis_path),
-                 'Wrote merged analysis to %s' % merged_analysis_path)
+        # Compare the merge result with the re-read one.
+        diffs = merged_analysis.diff(merged_analysis2)
+        self.assertEquals(merged_analysis, merged_analysis2, ''.join(
+          [unicode(diff) for diff in diffs]))
 
-      # Read merged analysis from file.
-      merged_analysis2 = self._time(lambda: parser.parse_from_path(merged_analysis_path),
-                                    'Read merged analysis from %s' % merged_analysis_path)
+        # Compare the merge result with the expected.
+        diffs = expected_merged_analysis.diff(merged_analysis2)
+        self.assertEquals(expected_merged_analysis, merged_analysis2, ''.join(
+          [unicode(diff) for diff in diffs]))
 
-      # Read the expected merged analysis from file.
-      expected_merged_analysis_path = os.path.join(analysis_dir, 'all.merged.analysis')
-      expected_merged_analysis = self._time(
-        lambda: parser.parse_from_path(expected_merged_analysis_path),
-        'Read expected merged analysis from %s' % expected_merged_analysis_path)
+        # Split the merged analysis back to individual analyses.
+        sources_per_analysis = [a.stamps.sources.keys() for a in analyses]
+        split_analyses = self._time(lambda: merged_analysis2.split(
+            sources_per_analysis, catchall=True),
+          'Split back into %d analyses' % num_analyses)
 
-      # Compare the merge result with the re-read one.
-      diffs = merged_analysis.diff(merged_analysis2)
-      self.assertEquals(merged_analysis, merged_analysis2, ''.join(
-        [unicode(diff) for diff in diffs]))
+        self.assertEquals(num_analyses + 1, len(split_analyses))  # +1 for the catchall.
+        catchall_analysis = split_analyses[-1]
 
-      # Compare the merge result with the expected.
-      diffs = expected_merged_analysis.diff(merged_analysis2)
-      self.assertEquals(expected_merged_analysis, merged_analysis2, ''.join(
-        [unicode(diff) for diff in diffs]))
+        # We expect an empty catchall.
+        self.assertEquals(0, len(catchall_analysis.stamps.sources))
 
-      # Split the merged analysis back to individual analyses.
-      sources_per_analysis = [a.stamps.sources.keys() for a in analyses]
-      split_analyses = self._time(lambda: merged_analysis2.split(
-        sources_per_analysis, os.path.dirname(__file__), catchall=True), 
-        'Split back into %d analyses' % num_analyses)
+        # Diff the original analyses and the split ones.
 
-      self.assertEquals(num_analyses + 1, len(split_analyses))  # +1 for the catchall.
-      catchall_analysis = split_analyses[-1]
+        # Write the split to the tmpdir, for ease of debugging on failure.
+        splits_dir = os.path.join(testdir, b'splits')
+        os.mkdir(splits_dir)
+        for analysis_file, analysis, split_analysis in zip(analysis_files, analyses, split_analyses):
+          outfile_path = os.path.join(splits_dir, os.path.basename(analysis_file))
+          split_analysis.write_to_path(outfile_path)
+          diffs = analysis.diff(split_analysis)
+          # Note that it's not true in general that merging splits and then splitting them back out
+          # should yield the exact same analysis. Some small differences can happen. For example:
+          # splitA may have an external src->class on a class from a source file in splitB; When
+          # merging, that becomes a src->src dependency; And when splitting back out that src
+          # dependency becomes a dependency on a representative class, which may not be
+          # the original class SplitA depended on.
+          #
+          # This comparison works here only because we've taken care to prepare test data for which
+          # it should hold. See _generate_testworthy_splits below for how to do so.
+          self.assertEquals(analysis, split_analysis, ''.join([unicode(diff) for diff in diffs]))
 
-      # We expect an empty catchall.
-      self.assertEquals(0, len(catchall_analysis.stamps.sources))
-
-      # Diff the original analyses and the split ones.
-
-      # Write the split to the tmpdir, for ease of debugging on failure.
-      splits_dir = os.path.join(tmpdir, 'splits')
-      os.mkdir(splits_dir)
-      for analysis_file, analysis, split_analysis in zip(analysis_files, analyses, split_analyses):
-        outfile_path = os.path.join(splits_dir, os.path.basename(analysis_file))
-        split_analysis.write_to_path(outfile_path)
-        diffs = analysis.diff(split_analysis)
-        # Note that it's not true in general that merging splits and then splitting them back out
-        # should yield the exact same analysis. Some small differences can happen. For example:
-        # splitA may have an external src->class on a class from a source file in splitB; When
-        # merging, that becomes a src->src dependency; And when splitting back out that src
-        # dependency becomes a dependency on a representative class, which may not be
-        # the original class SplitA depended on.
-        #
-        # This comparison works here only because we've taken care to prepare test data for which
-        # it should hold. See _generate_testworthy_splits below for how to do so.
-        self.assertEquals(analysis, split_analysis, ''.join([unicode(diff) for diff in diffs]))
-
-    print('Total time: %f seconds' % self.total_time)
-
+      print('Total time: %f seconds' % self.total_time)
 
   def _generate_testworthy_splits(self):
     """Take some non-canonical analysis files and generate test data from them.
@@ -227,3 +240,48 @@ class ZincAnalysisTest(unittest.TestCase):
       split_analysis.write_to_path(outpath)
 
     print('Wrote canonical analysis data to {}'.format(canonical_dir))
+
+
+class ZincAnalysisTestLarge(ZincAnalysisTestBase):
+  # Test on a couple of large files, primarily for benchmarking.
+  # Note that we don't set ZINCUTILS_SORTED_ANALYSIS='1', as we want to benchmark production
+  # performance (without unnecessary sorting).
+  def test_large(self):
+    parser = ZincAnalysisParser()
+
+    with _temp_test_dir('large.zip') as testdir:
+      # Parse analysis files.
+      analysis_file_names = [b'downstream.analysis', b'upstream.analysis']
+      analysis_files = [os.path.join(testdir, f) for f in analysis_file_names]
+
+      def msg(prefix):
+        return '{0} [{1}]'.format(prefix, ', '.join(analysis_file_names))
+
+      analyses = self._time(lambda: [parser.parse_from_path(f) for f in analysis_files],
+                            msg('Parsed'))
+
+      # Write them back out individually.
+      writeout_dir = os.path.join(testdir, b'write')
+      os.mkdir(writeout_dir)
+      def write(file_name, analysis):
+        outpath = os.path.join(writeout_dir, file_name)
+        analysis.write_to_path(outpath)
+
+      def _write_all():
+        for analysis_file, analysis in zip(analysis_files, analyses):
+          write(os.path.basename(analysis_file), analysis)
+
+      self._time(_write_all, msg('Wrote'))
+
+      # Merge them.
+      merged_analysis = self._time(lambda: ZincAnalysis.merge(analyses), msg('Merged'))
+
+      # Write merged analysis to file.
+      merged_analysis_path = os.path.join(testdir, b'merged.analysis')
+      self._time(lambda: merged_analysis.write_to_path(merged_analysis_path), msg('Wrote merge of'))
+
+      # Split the merged analysis.
+      sources_per_analysis = [a.stamps.sources.keys() for a in analyses]
+      self._time(lambda: merged_analysis.split(sources_per_analysis, catchall=True), msg('Split'))
+
+    print('Total time: %f seconds' % self.total_time)

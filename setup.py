@@ -10,7 +10,7 @@ config = {
     'author': 'Pants Contributors',
     'url': 'https://pypi.python.org/pypi/zincutils',
     'author_email': 'pants-devel@groups.google.com',
-    'version': '0.1',
+    'version': '0.1.1',
     'install_requires': ['six'],
     'packages': ['zincutils'],
     'scripts': [],

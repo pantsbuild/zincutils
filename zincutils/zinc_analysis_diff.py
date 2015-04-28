@@ -25,8 +25,8 @@ class DictDiff(object):
     if not keys_only:
       shared_keys = left_keys & right_keys
       for key in shared_keys:
-        left_value = left_dict[key]
-        right_value = right_dict[key]
+        left_value = left_dict.get(key)
+        right_value = right_dict.get(key)
         if left_value != right_value:
           self._diff_keys[key] = (left_value, right_value)
 
@@ -35,14 +35,17 @@ class DictDiff(object):
 
   def __unicode__(self):
     parts = []
+    def decode_all(strs):
+      return [s.decode('utf-8') for s in strs]
     if self._left_missing_keys:
       parts.append('Keys missing from left but available in right: {}'
-                   .format(', '.join(self._left_missing_keys)))
+                   .format(', '.join(decode_all(self._left_missing_keys))))
     if self._right_missing_keys:
       parts.append('Keys available in left but missing from right: {}'
-                   .format(', '.join(self._right_missing_keys)))
+                   .format(', '.join(decode_all(self._right_missing_keys))))
     for k, vs in self._diff_keys.items():
-      parts.append('Different values for key {}: left has {}, right has {}'.format(k, vs[0], vs[1]))
+      parts.append('Different values for key {}: left has {}, right has {}'.format(
+        k.decode('utf-8'), decode_all(vs[0]), decode_all(vs[1])))
     return '\n'.join(parts)
 
   def __str__(self):

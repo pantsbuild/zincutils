@@ -67,7 +67,7 @@ class ZincAnalysisTestSimple(ZincAnalysisTestBase):
       analysis_splits = full_analysis.split([
         ['/src/pants/examples/src/scala/org/pantsbuild/example/hello/welcome/Welcome.scala'],
         ['/src/pants/examples/src/scala/org/pantsbuild/example/hello/exe/Exe.scala'],
-      ], os.path.dirname(__file__))
+      ])
       self.assertEquals(len(analysis_splits), 2)
 
       def compare_split(i):
@@ -167,7 +167,7 @@ class ZincAnalysisTestComplex(ZincAnalysisTestBase):
         # Split the merged analysis back to individual analyses.
         sources_per_analysis = [a.stamps.sources.keys() for a in analyses]
         split_analyses = self._time(lambda: merged_analysis2.split(
-            sources_per_analysis, os.path.dirname(__file__), catchall=True),
+          sources_per_analysis, catchall=True),
           'Split back into %d analyses' % num_analyses)
 
         self.assertEquals(num_analyses + 1, len(split_analyses))  # +1 for the catchall.
@@ -282,7 +282,6 @@ class ZincAnalysisTestLarge(ZincAnalysisTestBase):
 
       # Split the merged analysis.
       sources_per_analysis = [a.stamps.sources.keys() for a in analyses]
-      self._time(lambda: merged_analysis.split(sources_per_analysis, os.path.dirname(__file__),
-                                               catchall=True), msg('Split'))
+      self._time(lambda: merged_analysis.split(sources_per_analysis, catchall=True), msg('Split'))
 
     print('Total time: %f seconds' % self.total_time)

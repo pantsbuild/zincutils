@@ -14,12 +14,11 @@ from contextlib import contextmanager
 
 @contextmanager
 def temporary_dir(root_dir=None, cleanup=True):
-  """
-    A with-context that creates a temporary directory.
+  """A with-context that creates a temporary directory.
 
-    You may specify the following keyword args:
-    :param str root_dir: The parent directory to create the temporary directory.
-    :param bool cleanup: Whether or not to clean up the temporary directory.
+  You may specify the following keyword args:
+  :param str root_dir: The parent directory to create the temporary directory.
+  :param bool cleanup: Whether or not to clean up the temporary directory.
   """
   path = tempfile.mkdtemp(dir=root_dir)
   try:
@@ -58,13 +57,12 @@ def environment_as(**kwargs):
 
 
 class Timer(object):
-  """Very basic with-context to time operations
+  """Very basic with-context to time operations.
 
   Example usage:
     from pants.util.contextutil import Timer
     with Timer() as timer:
       time.sleep(2)
-      ...
     timer.elapsed
     2.0020849704742432
 

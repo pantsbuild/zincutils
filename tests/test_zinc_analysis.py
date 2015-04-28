@@ -167,7 +167,7 @@ class ZincAnalysisTestComplex(ZincAnalysisTestBase):
         # Split the merged analysis back to individual analyses.
         sources_per_analysis = [a.stamps.sources.keys() for a in analyses]
         split_analyses = self._time(lambda: merged_analysis2.split(
-            sources_per_analysis, catchall=True),
+          sources_per_analysis, catchall=True),
           'Split back into %d analyses' % num_analyses)
 
         self.assertEquals(num_analyses + 1, len(split_analyses))  # +1 for the catchall.
@@ -234,7 +234,7 @@ class ZincAnalysisTestComplex(ZincAnalysisTestBase):
 
     # Split the merged analysis back to individual analyses.
     sources_per_analysis = [a.stamps.sources.keys() for a in original_split_analyses]
-    split_analyses = merged_analysis.split(sources_per_analysis)
+    split_analyses = merged_analysis.split(sources_per_analysis, os.path.dirname(__file__))
     for original_split_file, split_analysis in zip(original_splits_files, split_analyses):
       outpath = os.path.join(canonical_dir, os.path.basename(original_split_file))
       split_analysis.write_to_path(outpath)

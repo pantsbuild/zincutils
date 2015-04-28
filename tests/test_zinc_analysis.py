@@ -278,7 +278,8 @@ class ZincAnalysisTestLarge(ZincAnalysisTestBase):
 
       # Write merged analysis to file.
       merged_analysis_path = os.path.join(testdir, b'merged.analysis')
-      self._time(lambda: merged_analysis.write_to_path(merged_analysis_path), msg('Wrote merge of'))
+      for n in range(0, 20):
+        self._time(lambda: merged_analysis.write_to_path(merged_analysis_path), msg('Wrote merge of'))
 
       # Split the merged analysis.
       sources_per_analysis = [a.stamps.sources.keys() for a in analyses]

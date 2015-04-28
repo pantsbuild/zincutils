@@ -7,6 +7,7 @@ from __future__ import (absolute_import, division, generators, nested_scopes, pr
 
 import itertools
 import os
+import six
 from collections import defaultdict
 
 from zincutils.zinc_analysis_diff import ZincAnalysisElementDiff
@@ -91,7 +92,7 @@ class ZincAnalysisElement(object):
 
     rebasings = rebasings or []
     num_items = 0
-    for vals in rep.values():
+    for vals in six.itervalues(rep):
       num_items += len(vals)
 
     outfile.write(header + b':\n')
@@ -106,7 +107,7 @@ class ZincAnalysisElement(object):
 
     if os.environ.get('ZINCUTILS_SORTED_ANALYSIS'):
       # Write everything in a single chunk, so we can sort.
-      for k, vals in rep.items():
+      for k, vals in six.iteritems(rep):
         for v in vals:
           item = b'{} -> {}{}\n'.format(k, b'' if inline_vals else b'\n', v)
           fragments.append(item)
@@ -115,7 +116,7 @@ class ZincAnalysisElement(object):
     else:
       # It's not strictly necessary to chunk on item boundaries, but it's nicer.
       chunk_size = 40000 if inline_vals else 50000
-      for k, vals in rep.items():
+      for k, vals in six.iteritems(rep):
         for v in vals:
           fragments.append(k)
           fragments.append(b' -> ')
@@ -125,22 +126,21 @@ class ZincAnalysisElement(object):
           fragments.append(b'\n')
         if len(fragments) >= chunk_size:
           do_write()
-      if fragments:
-        do_write()
+      do_write()
 
   def translate_keys(self, token_translator, arg):
-    old_keys = list(arg.keys())
+    old_keys = list(six.iterkeys(arg))
     for k in old_keys:
       vals = arg[k]
       del arg[k]
       arg[token_translator.convert(k)] = vals
 
   def translate_values(self, token_translator, arg):
-    for k, vals in arg.iteritems():
+    for k, vals in six.iteritems(arg):
       arg[k] = [token_translator.convert(v) for v in vals]
 
   def translate_base64_values(self, token_translator, arg):
-    for k, vals in arg.iteritems():
+    for k, vals in six.iteritems(arg):
       arg[k] = [token_translator.convert_base64_string(v) for v in vals]
 
 
@@ -177,7 +177,7 @@ class ZincAnalysis(object):
     """
     ret = defaultdict(list)
     for d in dicts:
-      for k, v in d.items():
+      for k, v in six.iteritems(d):
         if k not in ret or ret[k] < v:
           ret[k] = v
     return ret

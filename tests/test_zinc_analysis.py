@@ -274,7 +274,8 @@ class ZincAnalysisTestLarge(ZincAnalysisTestBase):
       self._time(_write_all, msg('Wrote'))
 
       # Merge them.
-      merged_analysis = self._time(lambda: ZincAnalysis.merge(analyses), msg('Merged'))
+      for n in range(0, 50):
+        merged_analysis = self._time(lambda: ZincAnalysis.merge(analyses), msg('Merged'))
 
       # Write merged analysis to file.
       merged_analysis_path = os.path.join(testdir, b'merged.analysis')
@@ -282,7 +283,6 @@ class ZincAnalysisTestLarge(ZincAnalysisTestBase):
 
       # Split the merged analysis.
       sources_per_analysis = [a.stamps.sources.keys() for a in analyses]
-      for n in range(0, 20):
-        self._time(lambda: merged_analysis.split(sources_per_analysis, catchall=True), msg('Split'))
+      self._time(lambda: merged_analysis.split(sources_per_analysis, catchall=True), msg('Split'))
 
     print('Total time: %f seconds' % self.total_time)

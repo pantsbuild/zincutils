@@ -316,6 +316,7 @@ class ZincAnalysis(object):
     # Note: correctly handles "externalizing" internal deps that must be external post-split.
     if catchall:
       # Even empty sources with no products have stamps.
+      splits = [set(x) for x in splits]
       remainder_sources = set(self.sources()).difference(*splits)
       splits.append(remainder_sources)  # The catch-all
 

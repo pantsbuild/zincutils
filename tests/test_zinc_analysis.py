@@ -24,7 +24,7 @@ _TEST_DATA_SOURCE_ENV_VAR = 'ZINC_ANALYSIS_TEST_DATA_SOURCE'
 def _temp_test_dir(zipfile_name):
   """Yields a test directory containing the files in the specified zipfile."""
   zipfile_path = os.path.join(os.path.dirname(__file__), 'testdata', zipfile_name)
-  with temporary_dir(cleanup=False) as tmpdir:
+  with temporary_dir() as tmpdir:
     zf = zipfile.ZipFile(zipfile_path, 'r')
     zf.extractall(tmpdir)
     yield tmpdir

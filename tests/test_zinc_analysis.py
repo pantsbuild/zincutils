@@ -278,11 +278,11 @@ class ZincAnalysisTestLarge(ZincAnalysisTestBase):
 
       # Write merged analysis to file.
       merged_analysis_path = os.path.join(testdir, b'merged.analysis')
-      for n in range(0, 20):
-        self._time(lambda: merged_analysis.write_to_path(merged_analysis_path), msg('Wrote merge of'))
+      self._time(lambda: merged_analysis.write_to_path(merged_analysis_path), msg('Wrote merge of'))
 
       # Split the merged analysis.
       sources_per_analysis = [a.stamps.sources.keys() for a in analyses]
-      self._time(lambda: merged_analysis.split(sources_per_analysis, catchall=True), msg('Split'))
+      for n in range(0, 20):
+        self._time(lambda: merged_analysis.split(sources_per_analysis, catchall=True), msg('Split'))
 
     print('Total time: %f seconds' % self.total_time)

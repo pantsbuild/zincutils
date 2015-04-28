@@ -326,7 +326,7 @@ class ZincAnalysis(object):
     # specified as src->src.  So when splitting we need to pick a representative.  We must pick
     # consistently, so we take the first class name in alphanumeric order.
     def make_representatives():
-      representatives = dict((k, min(vs)) for k, vs in self.relations.classes.items())
+      representatives = dict((k, min(vs)) for k, vs in six.iteritems(self.relations.classes))
       return representatives
     representatives = make_representatives()
 
@@ -354,11 +354,11 @@ class ZincAnalysis(object):
           external = defaultdict(list)
 
           # Note that we take care not to create empty values in external.
-          for k, vs in naive_external.items():
+          for k, vs in six.iteritems(naive_external):
             if vs:
               external[k].extend(vs)  # Ensure a new list.
 
-          for k, vs in naive_internal.items():
+          for k, vs in six.iteritems(naive_internal):
             for v in vs:
               if v in split:
                 internal[k].append(v)  # Remains internal.
@@ -395,8 +395,8 @@ class ZincAnalysis(object):
       stamps_splits = []
       sources_splits = self._split_dict(self.stamps.sources, splits)
       for src_prod, binary_dep, sources in zip(src_prod_splits, binary_dep_splits, sources_splits):
-        products_set = set(itertools.chain(*src_prod.values()))
-        binaries_set = set(itertools.chain(*binary_dep.values()))
+        products_set = set(itertools.chain(*six.itervalues(src_prod)))
+        binaries_set = set(itertools.chain(*six.itervalues(binary_dep)))
         products, _ = self._restrict_dicts(products_set, self.stamps.products)
         binaries, classnames = self._restrict_dicts(binaries_set, self.stamps.binaries,
                                                     self.stamps.classnames)
@@ -408,7 +408,7 @@ class ZincAnalysis(object):
     def split_apis():
       # Externalized deps must copy the target's formerly internal API.
       representative_to_internal_api = {}
-      for src, rep in representatives.items():
+      for src, rep in six.iteritems(representatives):
         representative_to_internal_api[rep] = self.apis.internal.get(src)
 
       internal_api_splits = self._split_dict(self.apis.internal, splits)
@@ -416,7 +416,7 @@ class ZincAnalysis(object):
       external_api_splits = []
       for rel in relations_splits:
         external_api = {}
-        for vs in rel.external_dep.values():
+        for vs in six.itervalues(rel.external_dep):
           for v in vs:
             if v in representative_to_internal_api:  # This is an externalized dep.
               external_api[v] = representative_to_internal_api[v]

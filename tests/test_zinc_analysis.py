@@ -257,7 +257,8 @@ class ZincAnalysisTestLarge(ZincAnalysisTestBase):
       def msg(prefix):
         return '{0} [{1}]'.format(prefix, ', '.join(analysis_file_names))
 
-      analyses = self._time(lambda: [parser.parse_from_path(f) for f in analysis_files],
+      for n in range(0, 20):
+        analyses = self._time(lambda: [parser.parse_from_path(f) for f in analysis_files],
                             msg('Parsed'))
 
       # Write them back out individually.
@@ -274,8 +275,7 @@ class ZincAnalysisTestLarge(ZincAnalysisTestBase):
       self._time(_write_all, msg('Wrote'))
 
       # Merge them.
-      for n in range(0, 50):
-        merged_analysis = self._time(lambda: ZincAnalysis.merge(analyses), msg('Merged'))
+      merged_analysis = self._time(lambda: ZincAnalysis.merge(analyses), msg('Merged'))
 
       # Write merged analysis to file.
       merged_analysis_path = os.path.join(testdir, b'merged.analysis')

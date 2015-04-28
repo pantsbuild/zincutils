@@ -206,11 +206,11 @@ class ZincAnalysis(object):
       naive_external = ZincAnalysis.merge_disjoint_dicts(externals)
 
       # Note that we take care not to create empty values in internal.
-      for k, vs in naive_internal.items():
+      for k, vs in six.iteritems(naive_internal):
         if vs:
           internal[k].extend(vs)  # Ensure a new list.
 
-      for k, vs in naive_external.items():
+      for k, vs in six.iteritems(naive_external):
         # class->source is many->one, so make sure we only internalize a source once.
         internal_k = set(internal.get(k, []))
         for v in vs:
@@ -257,7 +257,7 @@ class ZincAnalysis(object):
     internal_apis = ZincAnalysis.merge_disjoint_dicts([a.apis.internal for a in analyses])
     naive_external_apis = ZincAnalysis.merge_disjoint_dicts([a.apis.external for a in analyses])
     external_apis = defaultdict(list)
-    for k, vs in naive_external_apis.items():
+    for k, vs in six.iteritems(naive_external_apis):
       kfile = class_to_source.get(k)
       if kfile and kfile in src_prod:
         internal_apis[kfile] = vs  # Internalized.
@@ -269,7 +269,7 @@ class ZincAnalysis(object):
     source_infos = SourceInfos((ZincAnalysis.merge_disjoint_dicts([a.source_infos.source_infos for a in analyses]), ))
 
     # Merge compilations.
-    compilation_vals = sorted(set([x[0] for a in analyses for x in a.compilations.compilations.itervalues()]))
+    compilation_vals = sorted(set([x[0] for a in analyses for x in six.itervalues(a.compilations.compilations)]))
     compilations_dict = defaultdict(list)
     for i, v in enumerate(compilation_vals):
       compilations_dict[b'{:03}'.format(int(i))] = [v]

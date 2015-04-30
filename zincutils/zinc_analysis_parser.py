@@ -11,9 +11,9 @@ from collections import defaultdict
 
 from six.moves import range
 
+from zincutils.strutil import parse_items
 from zincutils.zinc_analysis import (APIs, Compilations, CompileSetup, Relations,
     SourceInfos, Stamps, ZincAnalysis)
-
 
 class ZincAnalysisParser(object):
   """Parses a zinc analysis file."""
@@ -89,11 +89,7 @@ class ZincAnalysisParser(object):
         raise self.ParseError('Expected: "{}:". Found: "{}"'.format(expected_header, line))
     n = self._parse_num_items(lines_iter.next())
     relation = defaultdict(list)  # Values are lists, to accommodate relations.
-    for i in range(n):
-      k, _, v = lines_iter.next().partition(b' -> ')
-      if len(v) == 1:  # Value on its own line.
-        v = lines_iter.next()
-      relation[k].append(v[:-1])
+    parse_items(lines_iter, n, relation)
     return relation
 
   _num_items_re = re.compile(r'(\d+) items\n')

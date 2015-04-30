@@ -257,7 +257,8 @@ class ZincAnalysisTestLarge(ZincAnalysisTestBase):
       def msg(prefix):
         return '{0} [{1}]'.format(prefix, ', '.join(analysis_file_names))
 
-      analyses = self._time(lambda: [parser.parse_from_path(f) for f in analysis_files],
+      for n in range(0, 10):
+        analyses = self._time(lambda: [parser.parse_from_path(f) for f in analysis_files],
                             msg('Parsed'))
 
       # Write them back out individually.

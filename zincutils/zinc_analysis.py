@@ -81,14 +81,14 @@ class ZincAnalysisElement(object):
     Items are sorted, for ease of testing, only if ZINCUTILS_SORTED_ANALYSIS is set in
     the environment, and is not falsy. The sort is too costly to have in production use.
     """
-    def rebase(bytes):
+    def rebase(buf):
       for rebase_from, rebase_to in rebasings:
         if rebase_to is None:
-          if rebase_from in bytes:
+          if rebase_from in buf:
             return None
         else:
-          bytes = bytes.replace(rebase_from, rebase_to)
-      return bytes
+          buf = buf.replace(rebase_from, rebase_to)
+      return buf
 
     rebasings = rebasings or []
     num_items = 0

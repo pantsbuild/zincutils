@@ -12,7 +12,7 @@ import StringIO
 import unittest
 import zipfile
 
-from zincutils.zinc_analysis import ZincAnalysis
+from zincutils.zinc_analysis import ZincAnalysis, ZincAnalysisElement
 from zincutils.zinc_analysis_parser import ZincAnalysisParser
 from zincutils.contextutil import Timer, environment_as, temporary_dir
 
@@ -285,3 +285,31 @@ class ZincAnalysisTestLarge(ZincAnalysisTestBase):
       self._time(lambda: merged_analysis.split(sources_per_analysis, catchall=True), msg('Split'))
 
     print('Total time: %f seconds' % self.total_time)
+
+
+class ZincAnalysisTestSorting(ZincAnalysisTestBase):
+  class FakeElement(ZincAnalysisElement):
+    headers = ('foo', )
+
+  def test_sort(self):
+    unsorted_arg = { '{}'.format(n): ['f1', 'f2', 'f0'] for n in range(9, -1, -1) }
+    expected = ('foo:\n30 items\n' +
+                ''.join('{n} -> f0\n{n} -> f1\n{n} -> f2\n'.format(n=n) for n in range(0, 10)))
+
+    def do_test(elem):
+      # The values of a single key should be sorted in memory.
+      for n in range(0, 9):
+        self.assertEquals(['f0', 'f1', 'f2'], elem.args[0]['{}'.format(n)])
+      # And the keys themselves (and their values) should be sorted when writing.
+      buf = StringIO.StringIO()
+      elem.write(buf)
+      output = buf.getvalue()
+      self.assertMultiLineEqual(expected, output)
+
+    always_sorted_elem = self.FakeElement([unsorted_arg], always_sort=True)
+    do_test(always_sorted_elem)
+
+    # Unsorted elements must still sort if the environment var is set.
+    with environment_as(ZINCUTILS_SORTED_ANALYSIS='1'):
+      unsorted_elem = self.FakeElement([unsorted_arg])
+      do_test(unsorted_elem)

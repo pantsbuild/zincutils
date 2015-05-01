@@ -36,15 +36,20 @@ class ZincAnalysisElement(object):
   # The section names for the sections in this element. Subclasses override.
   headers = ()
 
-  def __init__(self, args):
-    # self.args is a list of maps from key to list of values. Each map corresponds to a
-    # section in the analysis file. E.g.,
-    #
-    # 'org/pantsbuild/Foo.scala': ['org/pantsbuild/Foo.class', 'org/pantsbuild/Foo$.class']
-    #
-    # Subclasses can alias the elements of self.args in their own __init__, for convenience.
+  def __init__(self, args, always_sort=False):
+    """
+    :param args: A list of maps from key to list of values.
+    :param always_sort: If True, sections are always sorted. Otherwise they are only sorted
+                        if the environment variable ZINCUTILS_SORTED_ANALYSIS is set.
 
-    if os.environ.get('ZINCUTILS_SORTED_ANALYSIS'):
+    Each map in ``args`` corresponds to a section in the analysis file. E.g.,
+
+    'org/pantsbuild/Foo.scala': ['org/pantsbuild/Foo.class', 'org/pantsbuild/Foo$.class']
+
+    Subclasses can alias the elements of self.args in their own __init__, for convenience.
+    """
+    self._always_sort = always_sort
+    if self.should_be_sorted():
       self.args = []
       for arg in args:
         sorted_arg = defaultdict(list)
@@ -56,6 +61,9 @@ class ZincAnalysisElement(object):
 
   def diff(self, other):
     return ZincAnalysisElementDiff(self, other)
+
+  def should_be_sorted(self):
+    return self._always_sort or os.environ.get('ZINCUTILS_SORTED_ANALYSIS')
 
   def __eq__(self, other):
     # Expects keys and vals to be sorted.
@@ -105,7 +113,7 @@ class ZincAnalysisElement(object):
       outfile.write(buf)
       del fragments[:]
 
-    if os.environ.get('ZINCUTILS_SORTED_ANALYSIS'):
+    if self.should_be_sorted():
       # Write everything in a single chunk, so we can sort.
       for k, vals in six.iteritems(rep):
         for v in vals:
@@ -511,7 +519,14 @@ class CompileSetup(ZincAnalysisElement):
              'compiler version', 'compile order', 'name hashing')
 
   def __init__(self, args):
-    super(CompileSetup, self).__init__(args)
+    # Most sections in CompileSetup are arrays represented as maps from index to item:
+    #   0 -> item0
+    #   1 -> item1
+    #   ...
+    #
+    # We ensure these are sorted, in case any reading code makes assumptions about the order.
+    # These are very small sections, so there's no performance impact to sorting them.
+    super(CompileSetup, self).__init__(args, always_sort=True)
     (self.output_mode, self.output_dirs, self.compile_options, self.javac_options,
      self.compiler_version, self.compile_order, self.name_hashing) = self.args
 

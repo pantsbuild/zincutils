@@ -6,150 +6,9 @@ from __future__ import (absolute_import, division, generators, nested_scopes, pr
                         unicode_literals, with_statement)
 
 import itertools
-import os
 import six
 from collections import defaultdict
-
-from zincutils.zinc_analysis_diff import ZincAnalysisElementDiff
-
-
-class ZincAnalysisElement(object):
-  """Encapsulates one part of a Zinc analysis.
-
-  Zinc analysis files are text files consisting of sections. Each section is introduced by
-  a header, followed by lines of the form K -> V, where the same K may repeat multiple times.
-
-  For example, the 'products:' section maps source files to the class files it produces, e.g.,
-
-  products:
-  123 items
-  org/pantsbuild/Foo.scala -> org/pantsbuild/Foo.class
-  org/pantsbuild/Foo.scala -> org/pantsbuild/Foo$.class
-  ...
-
-  Related consecutive sections are bundled together in "elements". E.g., the Stamps element
-  bundles the section for source file stamps, the section for jar file stamps etc.
-
-  An instance of this class represents such an element.
-  """
-
-  # The section names for the sections in this element. Subclasses override.
-  headers = ()
-
-  def __init__(self, args, always_sort=False):
-    """
-    :param args: A list of maps from key to list of values.
-    :param always_sort: If True, sections are always sorted. Otherwise they are only sorted
-                        if the environment variable ZINCUTILS_SORTED_ANALYSIS is set.
-
-    Each map in ``args`` corresponds to a section in the analysis file. E.g.,
-
-    'org/pantsbuild/Foo.scala': ['org/pantsbuild/Foo.class', 'org/pantsbuild/Foo$.class']
-
-    Subclasses can alias the elements of self.args in their own __init__, for convenience.
-    """
-    self._always_sort = always_sort
-    if self.should_be_sorted():
-      self.args = []
-      for arg in args:
-        sorted_arg = defaultdict(list)
-        for k, vs in arg.items():
-          sorted_arg[k] = sorted(vs)
-        self.args.append(sorted_arg)
-    else:
-      self.args = args
-
-  def diff(self, other):
-    return ZincAnalysisElementDiff(self, other)
-
-  def should_be_sorted(self):
-    return self._always_sort or os.environ.get('ZINCUTILS_SORTED_ANALYSIS')
-
-  def __eq__(self, other):
-    # Expects keys and vals to be sorted.
-    return self.args == other.args
-
-  def __ne__(self, other):
-    return not self.__eq__(other)
-
-  def __hash__(self):
-    return hash(self.args)
-
-  def write(self, outfile, inline_vals=True, rebasings=None):
-    self._write_multiple_sections(outfile, self.headers, self.args, inline_vals, rebasings)
-
-  def _write_multiple_sections(self, outfile, headers, reps, inline_vals=True, rebasings=None):
-    """Write multiple sections."""
-    for header, rep in zip(headers, reps):
-      self._write_section(outfile, header, rep, inline_vals, rebasings)
-
-  def _write_section(self, outfile, header, rep, inline_vals=True, rebasings=None):
-    """Write a single section.
-
-    Items are sorted, for ease of testing, only if ZINCUTILS_SORTED_ANALYSIS is set in
-    the environment, and is not falsy. The sort is too costly to have in production use.
-    """
-    def rebase(buf):
-      for rebase_from, rebase_to in rebasings:
-        if rebase_to is None:
-          if rebase_from in buf:
-            return None
-        else:
-          buf = buf.replace(rebase_from, rebase_to)
-      return buf
-
-    rebasings = rebasings or []
-    num_items = 0
-    for vals in six.itervalues(rep):
-      num_items += len(vals)
-
-    outfile.write(header + b':\n')
-    outfile.write(b'{} items\n'.format(num_items))
-
-    # Writing in large chunks is significantly faster than rebasing and writing line-by-line.
-    fragments = []
-    def do_write():
-      buf = rebase(b''.join(fragments))
-      outfile.write(buf)
-      del fragments[:]
-
-    if self.should_be_sorted():
-      # Write everything in a single chunk, so we can sort.
-      for k, vals in six.iteritems(rep):
-        for v in vals:
-          item = b'{} -> {}{}\n'.format(k, b'' if inline_vals else b'\n', v)
-          fragments.append(item)
-      fragments.sort()
-      do_write()
-    else:
-      # It's not strictly necessary to chunk on item boundaries, but it's nicer.
-      chunk_size = 40000 if inline_vals else 50000
-      for k, vals in six.iteritems(rep):
-        for v in vals:
-          fragments.append(k)
-          fragments.append(b' -> ')
-          if not inline_vals:
-            fragments.append(b'\n')
-          fragments.append(v)
-          fragments.append(b'\n')
-        if len(fragments) >= chunk_size:
-          do_write()
-      do_write()
-
-  def translate_keys(self, token_translator, arg):
-    old_keys = list(six.iterkeys(arg))
-    for k in old_keys:
-      vals = arg[k]
-      del arg[k]
-      arg[token_translator.convert(k)] = vals
-
-  def translate_values(self, token_translator, arg):
-    for k, vals in six.iteritems(arg):
-      arg[k] = [token_translator.convert(v) for v in vals]
-
-  def translate_base64_values(self, token_translator, arg):
-    for k, vals in six.iteritems(arg):
-      arg[k] = [token_translator.convert_base64_string(v) for v in vals]
+from zincutils.zinc_analysis_element_types import APIs, Compilations, CompileSetup, Relations, SourceInfos, Stamps
 
 
 class ZincAnalysis(object):
@@ -160,35 +19,7 @@ class ZincAnalysis(object):
   those yourself.
   """
 
-  # Implementation of class method required by Analysis.
-
   FORMAT_VERSION_LINE = b'format version: 5\n'
-
-  @staticmethod
-  def merge_disjoint_dicts(dicts):
-    """Merges multiple dicts with disjoint key sets into one.
-
-    May also be used when we don't care which value is picked for a key that appears more than once.
-    """
-    ret = defaultdict(list)
-    for d in dicts:
-      ret.update(d)
-    return ret
-
-  @staticmethod
-  def merge_overlapping_dicts(dicts):
-    """Merges multiple, possibly overlapping, dicts into one.
-
-    If a key exists in more than one dict, takes the largest value in dictionary order.
-    This is useful when the values are singleton stamp lists of the form ['lastModified(XXXXXXXX)'],
-    as it will lead to taking the most recent modification time.
-    """
-    ret = defaultdict(list)
-    for d in dicts:
-      for k, v in six.iteritems(d):
-        if k not in ret or ret[k] < v:
-          ret[k] = v
-    return ret
 
   @classmethod
   def merge(cls, analyses):
@@ -199,10 +30,10 @@ class ZincAnalysis(object):
     compile_setup = analyses[0].compile_setup if len(analyses) > 0 else CompileSetup((defaultdict(list), ))
 
     # Merge relations.
-    src_prod = ZincAnalysis.merge_disjoint_dicts([a.relations.src_prod for a in analyses])
-    binary_dep = ZincAnalysis.merge_disjoint_dicts([a.relations.binary_dep for a in analyses])
-    classes = ZincAnalysis.merge_disjoint_dicts([a.relations.classes for a in analyses])
-    used = ZincAnalysis.merge_disjoint_dicts([a.relations.used for a in analyses])
+    src_prod = ZincAnalysis._merge_disjoint_dicts([a.relations.src_prod for a in analyses])
+    binary_dep = ZincAnalysis._merge_disjoint_dicts([a.relations.binary_dep for a in analyses])
+    classes = ZincAnalysis._merge_disjoint_dicts([a.relations.classes for a in analyses])
+    used = ZincAnalysis._merge_disjoint_dicts([a.relations.used for a in analyses])
 
     class_to_source = dict((v, k) for k, vs in classes.items() for v in vs)
 
@@ -210,8 +41,8 @@ class ZincAnalysis(object):
       internal = defaultdict(list)
       external = defaultdict(list)
 
-      naive_internal = ZincAnalysis.merge_disjoint_dicts(internals)
-      naive_external = ZincAnalysis.merge_disjoint_dicts(externals)
+      naive_internal = ZincAnalysis._merge_disjoint_dicts(internals)
+      naive_external = ZincAnalysis._merge_disjoint_dicts(externals)
 
       # Note that we take care not to create empty values in internal.
       for k, vs in six.iteritems(naive_internal):
@@ -255,15 +86,15 @@ class ZincAnalysis(object):
                            classes, used))
 
     # Merge stamps.
-    products = ZincAnalysis.merge_disjoint_dicts([a.stamps.products for a in analyses])
-    sources = ZincAnalysis.merge_disjoint_dicts([a.stamps.sources for a in analyses])
-    binaries = ZincAnalysis.merge_overlapping_dicts([a.stamps.binaries for a in analyses])
-    classnames = ZincAnalysis.merge_disjoint_dicts([a.stamps.classnames for a in analyses])
+    products = ZincAnalysis._merge_disjoint_dicts([a.stamps.products for a in analyses])
+    sources = ZincAnalysis._merge_disjoint_dicts([a.stamps.sources for a in analyses])
+    binaries = ZincAnalysis._merge_overlapping_dicts([a.stamps.binaries for a in analyses])
+    classnames = ZincAnalysis._merge_disjoint_dicts([a.stamps.classnames for a in analyses])
     stamps = Stamps((products, sources, binaries, classnames))
 
     # Merge APIs.
-    internal_apis = ZincAnalysis.merge_disjoint_dicts([a.apis.internal for a in analyses])
-    naive_external_apis = ZincAnalysis.merge_disjoint_dicts([a.apis.external for a in analyses])
+    internal_apis = ZincAnalysis._merge_disjoint_dicts([a.apis.internal for a in analyses])
+    naive_external_apis = ZincAnalysis._merge_disjoint_dicts([a.apis.external for a in analyses])
     external_apis = defaultdict(list)
     for k, vs in six.iteritems(naive_external_apis):
       kfile = class_to_source.get(k)
@@ -274,7 +105,7 @@ class ZincAnalysis(object):
     apis = APIs((internal_apis, external_apis))
 
     # Merge source infos.
-    source_infos = SourceInfos((ZincAnalysis.merge_disjoint_dicts([a.source_infos.source_infos for a in analyses]), ))
+    source_infos = SourceInfos((ZincAnalysis._merge_disjoint_dicts([a.source_infos.source_infos for a in analyses]), ))
 
     # Merge compilations.
     compilation_vals = sorted(set([x[0] for a in analyses for x in six.itervalues(a.compilations.compilations)]))
@@ -284,6 +115,32 @@ class ZincAnalysis(object):
     compilations = Compilations((compilations_dict, ))
 
     return ZincAnalysis(compile_setup, relations, stamps, apis, source_infos, compilations)
+
+  @staticmethod
+  def _merge_disjoint_dicts(dicts):
+    """Merges multiple dicts with disjoint key sets into one.
+
+    May also be used when we don't care which value is picked for a key that appears more than once.
+    """
+    ret = defaultdict(list)
+    for d in dicts:
+      ret.update(d)
+    return ret
+
+  @staticmethod
+  def _merge_overlapping_dicts(dicts):
+    """Merges multiple, possibly overlapping, dicts into one.
+
+    If a key exists in more than one dict, takes the largest value in dictionary order.
+    This is useful when the values are singleton stamp lists of the form ['lastModified(XXXXXXXX)'],
+    as it will lead to taking the most recent modification time.
+    """
+    ret = defaultdict(list)
+    for d in dicts:
+      for k, v in six.iteritems(d):
+        if k not in ret or ret[k] < v:
+          ret[k] = v
+    return ret
 
   def __init__(self, compile_setup, relations, stamps, apis, source_infos, compilations):
     (self.compile_setup, self.relations, self.stamps, self.apis, self.source_infos, self.compilations) = \
@@ -455,18 +312,18 @@ class ZincAnalysis(object):
 
     return analyses
 
-  def write_to_path(self, outfile_path, rebasings=None):
+  def write_to_path(self, outfile_path):
     with open(outfile_path, 'w') as outfile:
-      self.write(outfile, rebasings)
+      self.write(outfile)
 
-  def write(self, outfile, rebasings=None):
+  def write(self, outfile):
     outfile.write(ZincAnalysis.FORMAT_VERSION_LINE)
-    self.compile_setup.write(outfile, inline_vals=True, rebasings=rebasings)
-    self.relations.write(outfile, rebasings=rebasings)
-    self.stamps.write(outfile, rebasings=rebasings)
-    self.apis.write(outfile, inline_vals=False, rebasings=rebasings)
-    self.source_infos.write(outfile, inline_vals=False, rebasings=rebasings)
-    self.compilations.write(outfile, inline_vals=True, rebasings=rebasings)
+    self.compile_setup.write(outfile)
+    self.relations.write(outfile)
+    self.stamps.write(outfile)
+    self.apis.write(outfile)
+    self.source_infos.write(outfile)
+    self.compilations.write(outfile)
 
   # Extra methods on this class only.
 
@@ -512,120 +369,3 @@ class ZincAnalysis(object):
       if dict2 is not None and k in dict2:
         ret2[k] = dict2[k]
     return ret1, ret2
-
-
-class CompileSetup(ZincAnalysisElement):
-  headers = ('output mode', 'output directories','compile options','javac options',
-             'compiler version', 'compile order', 'name hashing')
-
-  def __init__(self, args):
-    # Most sections in CompileSetup are arrays represented as maps from index to item:
-    #   0 -> item0
-    #   1 -> item1
-    #   ...
-    #
-    # We ensure these are sorted, in case any reading code makes assumptions about the order.
-    # These are very small sections, so there's no performance impact to sorting them.
-    super(CompileSetup, self).__init__(args, always_sort=True)
-    (self.output_mode, self.output_dirs, self.compile_options, self.javac_options,
-     self.compiler_version, self.compile_order, self.name_hashing) = self.args
-
-  def translate(self, token_translator):
-    self.translate_values(token_translator, self.output_dirs)
-    for k, vs in list(self.compile_options.items()):  # Make a copy, so we can del as we go.
-      # Remove mentions of custom plugins.
-      for v in vs:
-        if v.startswith(b'-Xplugin') or v.startswith(b'-P'):
-          del self.compile_options[k]
-
-
-class Relations(ZincAnalysisElement):
-  headers = (b'products', b'binary dependencies',
-             # TODO: The following 4 headers will go away after SBT completes the
-             # transition to the new headers (the 4 after that).
-             b'direct source dependencies', b'direct external dependencies',
-             b'public inherited source dependencies', b'public inherited external dependencies',
-             b'member reference internal dependencies', b'member reference external dependencies',
-             b'inheritance internal dependencies', b'inheritance external dependencies',
-             b'class names', b'used names')
-
-  def __init__(self, args):
-    super(Relations, self).__init__(args)
-    (self.src_prod, self.binary_dep,
-     self.internal_src_dep, self.external_dep,
-     self.internal_src_dep_pi, self.external_dep_pi,
-     self.member_ref_internal_dep, self.member_ref_external_dep,
-     self.inheritance_internal_dep, self.inheritance_external_dep,
-     self.classes, self.used) = self.args
-
-  def translate(self, token_translator):
-    for a in self.args:
-      self.translate_values(token_translator, a)
-      self.translate_keys(token_translator, a)
-
-
-class Stamps(ZincAnalysisElement):
-  headers = (b'product stamps', b'source stamps', b'binary stamps', b'class names')
-
-  def __init__(self, args):
-    super(Stamps, self).__init__(args)
-    (self.products, self.sources, self.binaries, self.classnames) = self.args
-
-  def translate(self, token_translator):
-    for a in self.args:
-      self.translate_keys(token_translator, a)
-    self.translate_values(token_translator, self.classnames)
-
-  # We make equality ignore the values in classnames: classnames is a map from
-  # jar file to one representative class in that jar, and the representative can change.
-  # However this doesn't affect any useful aspect of the analysis, so we ignore it.
-
-  def diff(self, other):
-    return ZincAnalysisElementDiff(self, other, keys_only_headers=('class names', ))
-
-  def __eq__(self, other):
-    return (self.products, self.sources, self.binaries, set(self.classnames.keys())) == \
-           (other.products, other.sources, other.binaries, set(other.classnames.keys()))
-
-  def __hash__(self):
-    return hash((self.products, self.sources, self.binaries, self.classnames.keys()))
-
-
-class APIs(ZincAnalysisElement):
-  headers = (b'internal apis', b'external apis')
-
-  def __init__(self, args):
-    super(APIs, self).__init__(args)
-    (self.internal, self.external) = self.args
-
-  def translate(self, token_translator):
-    for a in self.args:
-      self.translate_base64_values(token_translator, a)
-      self.translate_keys(token_translator, a)
-
-
-class SourceInfos(ZincAnalysisElement):
-  headers = (b'source infos', )
-
-  def __init__(self, args):
-    super(SourceInfos, self).__init__(args)
-    (self.source_infos, ) = self.args
-
-  def translate(self, token_translator):
-    for a in self.args:
-      self.translate_base64_values(token_translator, a)
-      self.translate_keys(token_translator, a)
-
-
-class Compilations(ZincAnalysisElement):
-  headers = (b'compilations', )
-
-  def __init__(self, args):
-    super(Compilations, self).__init__(args)
-    (self.compilations, ) = self.args
-    # Compilations aren't useful and can accumulate to be huge and drag down parse times.
-    # We clear them here to prevent them propagating through splits/merges.
-    self.compilations.clear()
-
-  def translate(self, token_translator):
-    pass

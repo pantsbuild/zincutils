@@ -12,7 +12,8 @@ import StringIO
 import unittest
 import zipfile
 
-from zincutils.zinc_analysis import ZincAnalysis, ZincAnalysisElement
+from zincutils.zinc_analysis import ZincAnalysis
+from zincutils.zinc_analysis_element import ZincAnalysisElement
 from zincutils.zinc_analysis_parser import ZincAnalysisParser
 from zincutils.contextutil import Timer, environment_as, temporary_dir
 
@@ -65,8 +66,8 @@ class ZincAnalysisTestSimple(ZincAnalysisTestBase):
       full_analysis = parse_analyis('simple.analysis')
 
       analysis_splits = full_analysis.split([
-        ['/src/pants/examples/src/scala/org/pantsbuild/example/hello/welcome/Welcome.scala'],
-        ['/src/pants/examples/src/scala/org/pantsbuild/example/hello/exe/Exe.scala'],
+        [b'/src/pants/examples/src/scala/org/pantsbuild/example/hello/welcome/Welcome.scala'],
+        [b'/src/pants/examples/src/scala/org/pantsbuild/example/hello/exe/Exe.scala'],
       ])
       self.assertEquals(len(analysis_splits), 2)
 
@@ -95,6 +96,23 @@ class ZincAnalysisTestSimple(ZincAnalysisTestBase):
       expected = get_analysis_text('simple.analysis')
       actual = analysis_to_string(merged_analysis)
       self.assertMultiLineEqual(expected, actual)
+
+      # Now check rebasing.
+      orig = iter(get_analysis_text('simple.analysis').splitlines(True))
+      expected_rebased = get_analysis_text('simple.rebased.analysis')
+      buf = StringIO.StringIO()
+      ZincAnalysisParser().rebase(orig, buf, b'/src/pants', b'$PANTS_HOME')
+      rebased = buf.getvalue()
+      self.assertMultiLineEqual(expected_rebased, rebased)
+
+      # And rebasing+filtering.
+      orig = iter(get_analysis_text('simple.analysis').splitlines(True))
+      expected_filtered_rebased = get_analysis_text('simple.rebased.filtered.analysis')
+      buf = StringIO.StringIO()
+      ZincAnalysisParser().rebase(orig, buf, b'/src/pants', b'$PANTS_HOME',
+                                  b'/Library/Java/JavaVirtualMachines/jdk1.8.0_40.jdk')
+      filtered_rebased = buf.getvalue()
+      self.assertMultiLineEqual(expected_filtered_rebased, filtered_rebased)
 
 
 class ZincAnalysisTestComplex(ZincAnalysisTestBase):
@@ -250,6 +268,7 @@ class ZincAnalysisTestLarge(ZincAnalysisTestBase):
     parser = ZincAnalysisParser()
 
     with _temp_test_dir('large.zip') as testdir:
+      print('Operating in test dir: {}'.format(testdir))
       # Parse analysis files.
       analysis_file_names = [b'downstream.analysis', b'upstream.analysis']
       analysis_files = [os.path.join(testdir, f) for f in analysis_file_names]
@@ -283,6 +302,11 @@ class ZincAnalysisTestLarge(ZincAnalysisTestBase):
       # Split the merged analysis.
       sources_per_analysis = [a.stamps.sources.keys() for a in analyses]
       self._time(lambda: merged_analysis.split(sources_per_analysis, catchall=True), msg('Split'))
+
+      # Rebase the merged analysis.
+      rebased_analysis_path = os.path.join(testdir, b'rebased.merged.analysis')
+      self._time(lambda: ZincAnalysisParser().rebase_from_path(merged_analysis_path, rebased_analysis_path,
+          b'/Users/kermit/src/acme.web', b'$PANTS_HOME'), msg('Rebase'))
 
     print('Total time: %f seconds' % self.total_time)
 

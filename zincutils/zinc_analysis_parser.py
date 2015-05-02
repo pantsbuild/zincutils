@@ -70,6 +70,68 @@ class ZincAnalysisParser(object):
       ret.update(d)
     return ret
 
+  def rebase_from_path(self, infile_path, outfile_path, pants_home_from, pants_home_to, java_home=None):
+    with open(infile_path, 'r') as infile:
+      with open(outfile_path, 'w') as outfile:
+        self.rebase(infile, outfile, pants_home_from, pants_home_to, java_home)
+
+  def rebase(self, infile, outfile, pants_home_from, pants_home_to, java_home=None):
+    self._verify_version(infile)
+    outfile.write(ZincAnalysis.FORMAT_VERSION_LINE)
+
+    def rebase_element(cls):
+      for header in cls.headers:
+        self._rebase_section(cls, header, infile, outfile, pants_home_from, pants_home_to, java_home)
+
+    rebase_element(CompileSetup)
+    rebase_element(Relations)
+    rebase_element(Stamps)
+    rebase_element(APIs)
+    rebase_element(SourceInfos)
+    rebase_element(Compilations)
+
+  def _rebase_section(self, cls, header, lines_iter, outfile,
+                      pants_home_from, pants_home_to, java_home=None):
+    # Booleans describing the rebasing logic to apply, if any.
+    rebase_pants_home_anywhere = header in cls.pants_home_anywhere
+    rebase_pants_home_prefix = header in cls.pants_home_prefix_only
+    filter_java_home_anywhere = java_home and header in cls.java_home_anywhere
+    filter_java_home_prefix = java_home and header in cls.java_home_prefix_only
+
+    # Check the header and get the number of items.
+    line = lines_iter.next()
+    if header + b':\n' != line:
+      raise self.ParseError('Expected: "{}:". Found: "{}"'.format(header, line))
+    n = self._parse_num_items(lines_iter.next())
+
+    # Iterate over the lines, applying rebasing/dropping logic as required.
+    rebased_lines = []
+    num_rebased_items = 0
+    for i in range(n):
+      line = lines_iter.next()
+      drop_line = ((filter_java_home_anywhere and java_home in line) or
+                   (filter_java_home_prefix and line.startswith(java_home)))
+      if not drop_line:
+        if rebase_pants_home_anywhere:
+          rebased_line = line.replace(pants_home_from, pants_home_to)
+        elif rebase_pants_home_prefix and line.startswith(pants_home_from):
+          rebased_line = pants_home_to + line[len(pants_home_from):]
+        else:
+          rebased_line = line
+        rebased_lines.append(rebased_line)
+        num_rebased_items += 1
+        if not cls.inline_vals:  # These values are blobs and never need to be rebased.
+          rebased_lines.append(lines_iter.next())
+      elif not cls.inline_vals:
+        lines_iter.next()  # Also drop the non-inline value.
+
+    # Write the rebased lines back out.
+    outfile.write(header + b':\n')
+    outfile.write(b'{} items\n'.format(num_rebased_items))
+    chunk_size = 10000
+    for i in  range(0, len(rebased_lines), chunk_size):
+      outfile.write(b''.join(rebased_lines[i:i+chunk_size]))
+
   def _find_repeated_at_header(self, lines_iter, header):
     header_line = header + b':\n'
     while lines_iter.next() != header_line:

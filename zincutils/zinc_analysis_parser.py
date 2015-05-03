@@ -99,16 +99,16 @@ class ZincAnalysisParser(object):
     filter_java_home_prefix = java_home and header in cls.java_home_prefix_only
 
     # Check the header and get the number of items.
-    line = lines_iter.next()
+    line = next(lines_iter)
     if header + b':\n' != line:
       raise self.ParseError('Expected: "{}:". Found: "{}"'.format(header, line))
-    n = self._parse_num_items(lines_iter.next())
+    n = self._parse_num_items(next(lines_iter))
 
     # Iterate over the lines, applying rebasing/dropping logic as required.
     rebased_lines = []
     num_rebased_items = 0
-    for i in range(n):
-      line = lines_iter.next()
+    for _ in range(n):
+      line = next(lines_iter)
       drop_line = ((filter_java_home_anywhere and java_home in line) or
                    (filter_java_home_prefix and line.startswith(java_home)))
       if not drop_line:
@@ -121,40 +121,40 @@ class ZincAnalysisParser(object):
         rebased_lines.append(rebased_line)
         num_rebased_items += 1
         if not cls.inline_vals:  # These values are blobs and never need to be rebased.
-          rebased_lines.append(lines_iter.next())
+          rebased_lines.append(next(lines_iter))
       elif not cls.inline_vals:
-        lines_iter.next()  # Also drop the non-inline value.
+        next(lines_iter)  # Also drop the non-inline value.
 
     # Write the rebased lines back out.
     outfile.write(header + b':\n')
     outfile.write(b'{} items\n'.format(num_rebased_items))
     chunk_size = 10000
-    for i in  range(0, len(rebased_lines), chunk_size):
+    for i in range(0, len(rebased_lines), chunk_size):
       outfile.write(b''.join(rebased_lines[i:i+chunk_size]))
 
   def _find_repeated_at_header(self, lines_iter, header):
     header_line = header + b':\n'
-    while lines_iter.next() != header_line:
+    while next(lines_iter) != header_line:
       pass
     return self._parse_section(lines_iter, expected_header=None)
 
   def _verify_version(self, lines_iter):
-    version_line = lines_iter.next()
+    version_line = next(lines_iter)
     if version_line != ZincAnalysis.FORMAT_VERSION_LINE:
       raise self.ParseError('Unrecognized version line: ' + version_line)
 
   def _parse_section(self, lines_iter, expected_header=None):
     """Parse a single section."""
     if expected_header:
-      line = lines_iter.next()
+      line = next(lines_iter)
       if expected_header + b':\n' != line:
         raise self.ParseError('Expected: "{}:". Found: "{}"'.format(expected_header, line))
-    n = self._parse_num_items(lines_iter.next())
+    n = self._parse_num_items(next(lines_iter))
     relation = defaultdict(list)  # Values are lists, to accommodate relations.
-    for i in range(n):
-      k, _, v = lines_iter.next().partition(b' -> ')
+    for _ in range(n):
+      k, _, v = next(lines_iter).partition(b' -> ')
       if len(v) == 1:  # Value on its own line.
-        v = lines_iter.next()
+        v = next(lines_iter)
       relation[k].append(v[:-1])
     return relation
 

@@ -10,12 +10,12 @@ from zincutils.zinc_analysis_element import ZincAnalysisElement
 
 
 class CompileSetup(ZincAnalysisElement):
-  headers = ('output mode', 'output directories','compile options','javac options',
+  headers = ('output mode', 'output directories', 'compile options', 'javac options',
              'compiler version', 'compile order', 'name hashing')
 
   # Output directories can obviously contain directories under pants_home. Compile/javac options may
   # refer to directories under pants_home.
-  pants_home_anywhere = ('output directories','compile options','javac options')
+  pants_home_anywhere = ('output directories', 'compile options', 'javac options')
 
   def __init__(self, args):
     # Most sections in CompileSetup are arrays represented as maps from index to item:
@@ -56,7 +56,7 @@ class Relations(ZincAnalysisElement):
                          b'used names')
   # External dependencies and class names are src->fqcn.
   pants_home_prefix_only = (b'direct external dependencies', b'public inherited external dependencies',
-                            b'member reference external dependencies',  b'inheritance external dependencies',
+                            b'member reference external dependencies', b'inheritance external dependencies',
                             b'class names')
   # Binary dependencies are src->jarfile, and that jarfile might be under the jvm home.
   java_home_anywhere = (b'binary dependencies',)

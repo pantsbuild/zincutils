@@ -78,7 +78,7 @@ class ZincAnalysisTestSimple(ZincAnalysisTestBase):
         # text comparison because in some cases there can be small text differences that don't
         # affect logical equivalence.
         expected_analyis = parse_analyis(expected_filename)
-        self.assertTrue(expected_analyis == analysis_splits[i])
+        self.assertTrue(expected_analyis.is_equal_to(analysis_splits[i]))
 
         # Then compare as text.  In this simple case we expect them to be byte-for-byte equal.
         expected = get_analysis_text(expected_filename)
@@ -91,7 +91,7 @@ class ZincAnalysisTestSimple(ZincAnalysisTestBase):
       # Now merge and check that we get what we started with.
       merged_analysis = ZincAnalysis.merge(analysis_splits)
       # Check that they compare as objects.
-      self.assertTrue(full_analysis == merged_analysis)
+      self.assertTrue(full_analysis.is_equal_to(merged_analysis))
       # Check that they compare as text.
       expected = get_analysis_text('simple.analysis')
       actual = analysis_to_string(merged_analysis)
@@ -174,12 +174,12 @@ class ZincAnalysisTestComplex(ZincAnalysisTestBase):
 
         # Compare the merge result with the re-read one.
         diffs = merged_analysis.diff(merged_analysis2)
-        self.assertEquals(merged_analysis, merged_analysis2, ''.join(
+        self.assertTrue(merged_analysis.is_equal_to(merged_analysis2), ''.join(
           [unicode(diff) for diff in diffs]))
 
         # Compare the merge result with the expected.
         diffs = expected_merged_analysis.diff(merged_analysis2)
-        self.assertEquals(expected_merged_analysis, merged_analysis2, ''.join(
+        self.assertTrue(expected_merged_analysis.is_equal_to(merged_analysis2), ''.join(
           [unicode(diff) for diff in diffs]))
 
         # Split the merged analysis back to individual analyses.
@@ -212,7 +212,8 @@ class ZincAnalysisTestComplex(ZincAnalysisTestBase):
           #
           # This comparison works here only because we've taken care to prepare test data for which
           # it should hold. See _generate_testworthy_splits below for how to do so.
-          self.assertEquals(analysis, split_analysis, ''.join([unicode(diff) for diff in diffs]))
+          self.assertTrue(analysis.is_equal_to(split_analysis),
+                          ''.join([unicode(diff) for diff in diffs]))
 
       print('Total time: %f seconds' % self.total_time)
 

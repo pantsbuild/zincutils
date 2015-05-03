@@ -23,7 +23,7 @@ class ZincAnalysisParser(object):
 
   def parse_from_path(self, infile_path):
     """Parse a ZincAnalysis instance from a text file."""
-    with open(infile_path, 'r') as infile:
+    with open(infile_path, 'rb') as infile:
       return self.parse(infile)
 
   def parse(self, infile):
@@ -71,8 +71,8 @@ class ZincAnalysisParser(object):
     return ret
 
   def rebase_from_path(self, infile_path, outfile_path, pants_home_from, pants_home_to, java_home=None):
-    with open(infile_path, 'r') as infile:
-      with open(outfile_path, 'w') as outfile:
+    with open(infile_path, 'rb') as infile:
+      with open(outfile_path, 'wb') as outfile:
         self.rebase(infile, outfile, pants_home_from, pants_home_to, java_home)
 
   def rebase(self, infile, outfile, pants_home_from, pants_home_to, java_home=None):

@@ -162,11 +162,15 @@ class ZincAnalysis(object):
   def sources(self):
     return self.stamps.sources.keys()
 
-  def __eq__(self, other):
-    return ((self.compile_setup, self.relations, self.stamps, self.apis,
-             self.source_infos, self.compilations) ==
-            (other.compile_setup, other.relations, other.stamps, other.apis,
-             other.source_infos, other.compilations))
+  def is_equal_to(self, other):
+    for self_element, other_element in zip(
+        (self.compile_setup, self.relations, self.stamps, self.apis,
+         self.source_infos, self.compilations),
+        (other.compile_setup, other.relations, other.stamps, other.apis,
+         other.source_infos, other.compilations)):
+      if not self_element.is_equal_to(other_element):
+        return False
+    return True
 
   def __ne__(self, other):
     return not self.__eq__(other)
@@ -313,7 +317,7 @@ class ZincAnalysis(object):
     return analyses
 
   def write_to_path(self, outfile_path):
-    with open(outfile_path, 'w') as outfile:
+    with open(outfile_path, 'wb') as outfile:
       self.write(outfile)
 
   def write(self, outfile):

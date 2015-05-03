@@ -87,15 +87,11 @@ class ZincAnalysisElement(object):
   def should_be_sorted(self):
     return self._always_sort or os.environ.get('ZINCUTILS_SORTED_ANALYSIS')
 
-  def __eq__(self, other):
-    # Expects keys and vals to be sorted.
+  def is_equal_to(self, other):
+    # Is sensitive to ordering of keys and vals. Will NOT WORK as expected unless
+    # should_be_sorted() returns True for both self and other.  So only call this
+    # in tests, where you're guaranteeing that sorting.
     return self.args == other.args
-
-  def __ne__(self, other):
-    return not self.__eq__(other)
-
-  def __hash__(self):
-    return hash(self.args)
 
   def write(self, outfile):
     self._write_multiple_sections(outfile, self.headers, self.args)
@@ -111,9 +107,7 @@ class ZincAnalysisElement(object):
     Items are sorted, for ease of testing, only if ZINCUTILS_SORTED_ANALYSIS is set in
     the environment, and is not falsy. The sort is too costly to have in production use.
     """
-    num_items = 0
-    for vals in six.itervalues(rep):
-      num_items += len(vals)
+    num_items = sum(len(vals) for vals in six.itervalues(rep))
 
     outfile.write(header + b':\n')
     outfile.write(b'{} items\n'.format(num_items))

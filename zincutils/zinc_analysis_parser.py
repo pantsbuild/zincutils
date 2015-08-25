@@ -67,7 +67,8 @@ class ZincAnalysisParser(object):
 
     ret = defaultdict(list)
     for d in [filtered_bin_deps, src_deps, transformed_ext_deps]:
-      ret.update(d)
+      for src, deps in d.items():
+        ret[src].extend(deps)
     return ret
 
   def rebase_from_path(self, infile_path, outfile_path, pants_home_from, pants_home_to, java_home=None):

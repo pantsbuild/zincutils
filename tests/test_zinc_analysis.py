@@ -114,6 +114,15 @@ class ZincAnalysisTestSimple(ZincAnalysisTestBase):
       filtered_rebased = buf.getvalue()
       self.assertMultiLineEqual(expected_filtered_rebased, filtered_rebased)
 
+      # Check parse_deps is returning both bin and src dependencies.
+      infile = iter(get_analysis_text('simple.analysis').splitlines(True))
+      deps = ZincAnalysisParser().parse_deps(infile, '')
+      f = '/src/pants/examples/src/scala/org/pantsbuild/example/hello/exe/Exe.scala'
+      self.assertItemsEqual(deps[f], [
+          '/Library/Java/JavaVirtualMachines/jdk1.8.0_40.jdk/Contents/Home/jre/lib/rt.jar',
+          '/src/pants/examples/src/scala/org/pantsbuild/example/hello/welcome/Welcome.scala',
+        ])
+
 
 class ZincAnalysisTestComplex(ZincAnalysisTestBase):
   # Test on complex analysis files.
